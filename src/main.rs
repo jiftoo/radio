@@ -22,13 +22,26 @@ async fn main() {
 	// let path: &Path = "C:\\Users\\Jiftoo\\Downloads".as_ref();
 	// let path: &Path = "./".as_ref();
 
-	let path = std::env::args().nth(1);
+	let port = std::env::args().nth(1);
+	let path = std::env::args().nth(2);
 	let path: PathBuf = match path {
 		Some(path) => path.into(),
 		None => {
-			println!("Usage: {} <path>", std::env::args().next().unwrap());
+			println!("Usage: {} <port> <path>", std::env::args().next().unwrap());
 			return;
 		}
+	};
+	let port = match port {
+		Some(port) => port,
+		None => {
+			println!("Usage: {} <port> <path>", std::env::args().next().unwrap());
+			return;
+		}
+	};
+
+	let Ok(port) = port.parse::<u16>() else {
+		println!("Invalid port: {:?}", port);
+		return;
 	};
 
 	if !path.exists() {
@@ -49,11 +62,20 @@ async fn main() {
 		}
 	};
 
-	println!("Files: {:?}", player.files());
+	println!("Playlist:");
+	let take = 10;
+	for x in player.files().iter().take(take) {
+		println!("  {:?}", x);
+	}
+	if player.files().len() > take {
+		println!(" ... and {} more", player.files().len() - take);
+	}
 
 	let app = Router::new().route("/", get(stream)).with_state(player.clone());
 
-	let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+	let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await.unwrap();
+	println!("Listening on port {}", port);
+
 	axum::serve(listener, app).await.unwrap();
 }
 
