@@ -8,7 +8,7 @@ mod player;
 use std::{
 	error::Error,
 	fmt::{Debug, Display, Formatter},
-	path::Path,
+	path::{Path, PathBuf},
 };
 
 use axum::{
@@ -19,10 +19,29 @@ use player::Player;
 
 #[tokio::main]
 async fn main() {
-	let path: &Path = "C:\\Users\\Jiftoo\\Downloads".as_ref();
+	// let path: &Path = "C:\\Users\\Jiftoo\\Downloads".as_ref();
 	// let path: &Path = "./".as_ref();
 
-	let player = Player::new(files::collect(path));
+	let path = std::env::args().nth(1);
+	let path: PathBuf = match path {
+		Some(path) => path.into(),
+		None => {
+			println!("Usage: {} <path>", std::env::args().next().unwrap());
+			return;
+		}
+	};
+
+	if !path.exists() {
+		println!("{} does not exist", path.display());
+		return;
+	}
+
+	if !path.is_dir() {
+		println!("{} is not a directory", path.display());
+		return;
+	}
+
+	let player = Player::new(files::collect(&path));
 
 	println!("Files: {:?}", player.files());
 
