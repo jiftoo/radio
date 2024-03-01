@@ -65,7 +65,7 @@ async fn main() {
 	println!("Playlist:");
 	let take = 10;
 	for x in player.files().iter().take(take) {
-		println!("  {:?}", x);
+		println!("  {}", x.display());
 	}
 	if player.files().len() > take {
 		println!(" ... and {} more", player.files().len() - take);
