@@ -41,7 +41,13 @@ async fn main() {
 		return;
 	}
 
-	let player = Player::new(files::collect(&path));
+	let player = match Player::new(files::collect(&path)) {
+		Ok(player) => player,
+		Err(e) => {
+			println!("Player error: {:?}", e);
+			return;
+		}
+	};
 
 	println!("Files: {:?}", player.files());
 

@@ -39,14 +39,23 @@ enum TaskControlMessage {
 
 pub type PlayerRx = tokio::sync::broadcast::Receiver<Bytes>;
 
+#[derive(Debug)]
+pub enum Error {
+	EmptyPlayilist,
+}
+
 impl Player {
-	pub fn new(playlist: Vec<PathBuf>) -> Self {
+	pub fn new(playlist: Vec<PathBuf>) -> Result<Self, Error> {
+		if playlist.is_empty() {
+			return Err(Error::EmptyPlayilist);
+		}
+
 		let index = 0;
 		let tx = tokio::sync::broadcast::channel(4).0;
 
 		let player = Self {
 			inner: Arc::new(Inner {
-				playlist: playlist.into(),
+				playlist: playlist.into_boxed_slice(),
 				index: index.into(),
 				tx,
 				task_control_tx: tokio::sync::watch::channel(TaskControlMessage::Play).0,
@@ -56,7 +65,7 @@ impl Player {
 
 		player.clone().spawn_task();
 
-		player
+		Ok(player)
 	}
 
 	fn spawn_task(self) {
