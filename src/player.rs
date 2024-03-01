@@ -97,10 +97,13 @@ impl Player {
 		use tokio::process::Command;
 
 		let Inner { playlist, index, tx, config, .. } = &*self.inner;
+		let index = index.load(Ordering::Relaxed);
+		println!("playing: {:?}", playlist[index].file_name().unwrap());
+
 		let mut handle = Command::new("ffmpeg")
 			.args(["-hide_banner", "-loglevel", "error"])
 			.args(["-re", "-threads", "1", "-i"])
-			.arg(&playlist[index.load(Ordering::Relaxed)])
+			.arg(&playlist[index])
 			.args([
 				"-c:a",
 				"mp3",
@@ -188,7 +191,5 @@ impl Player {
 		}
 
 		index.store(loaded_index, Ordering::Relaxed);
-
-		println!("next song: {:?}", playlist[loaded_index].file_name().unwrap());
 	}
 }
