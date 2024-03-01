@@ -5,7 +5,7 @@ use std::{
 
 use rayon::prelude::*;
 
-pub fn collect_files(path: &Path) -> Vec<PathBuf> {
+pub fn collect(path: &Path) -> Vec<PathBuf> {
 	const SUPPORTED_FORMATS: [&str; 4] = ["mp3", "flac", "opus", "wav"];
 
 	let pool = Arc::new(rayon::ThreadPoolBuilder::new().build().unwrap());
@@ -24,8 +24,7 @@ pub fn collect_files(path: &Path) -> Vec<PathBuf> {
 					&& Path::new(&x.file_name)
 						.extension()
 						.and_then(|x| x.to_str())
-						.map(|x| SUPPORTED_FORMATS.contains(&x))
-						.unwrap_or(false);
+						.is_some_and(|x| SUPPORTED_FORMATS.contains(&x));
 				cond.then(|| x.path())
 			})
 			.collect::<Vec<_>>()

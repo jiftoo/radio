@@ -10,26 +10,23 @@ use std::{
 
 use axum::body::Bytes;
 use rand::Rng;
-use symphonia::core::io::MediaSourceStream;
-use tokio::{
-	io::AsyncReadExt,
-	sync::{Barrier, Notify, RwLock},
-};
+
+use tokio::io::AsyncReadExt;
 
 #[derive(Clone)]
 pub struct Player {
-	inner: Arc<PlayerInner>,
+	inner: Arc<Inner>,
 }
 
-pub struct PlayerInner {
+pub struct Inner {
 	playlist: Box<[PathBuf]>,
 	index: AtomicUsize,
 	tx: tokio::sync::broadcast::Sender<Bytes>,
 	task_control_tx: tokio::sync::watch::Sender<TaskControlMessage>,
-	config: PlayerConfig,
+	config: Config,
 }
 
-pub struct PlayerConfig {
+pub struct Config {
 	shuffle: AtomicBool,
 	bitrate_k: AtomicUsize,
 }
@@ -48,12 +45,12 @@ impl Player {
 		let tx = tokio::sync::broadcast::channel(4).0;
 
 		let player = Self {
-			inner: Arc::new(PlayerInner {
+			inner: Arc::new(Inner {
 				playlist: playlist.into(),
 				index: index.into(),
 				tx,
 				task_control_tx: tokio::sync::watch::channel(TaskControlMessage::Play).0,
-				config: PlayerConfig { shuffle: false.into(), bitrate_k: 128.into() },
+				config: Config { shuffle: false.into(), bitrate_k: 128.into() },
 			}),
 		};
 
@@ -88,9 +85,9 @@ impl Player {
 	}
 
 	async fn play_next(&self) {
-		use tokio::process::*;
+		use tokio::process::Command;
 
-		let PlayerInner { playlist, index, tx, config, .. } = &*self.inner;
+		let Inner { playlist, index, tx, config, .. } = &*self.inner;
 		let mut handle = Command::new("ffmpeg")
 			.args(["-hide_banner", "-loglevel", "error"])
 			.args(["-re", "-threads", "1", "-i"])
@@ -104,6 +101,9 @@ impl Player {
 				"0",
 				"-id3v2_version",
 				"0",
+				"-map_metadata",
+				"-1",
+				"-vn",
 				"-f",
 				"mp3",
 				"-",
@@ -122,7 +122,7 @@ impl Player {
 			if read == 0 {
 				stderr.read_to_string(err_buf).await.unwrap();
 				if !err_buf.is_empty() {
-					println!("ffmpeg error: {}", err_buf);
+					println!("ffmpeg error: {err_buf}");
 					std::process::exit(1);
 				}
 				break;
@@ -143,7 +143,7 @@ impl Player {
 	}
 
 	pub fn set_index(&mut self, index: usize) {
-		self.inner.index.store(index, Ordering::Relaxed)
+		self.inner.index.store(index, Ordering::Relaxed);
 	}
 
 	pub fn index(&self) -> usize {
@@ -163,7 +163,7 @@ impl Player {
 	}
 
 	fn next(&self) {
-		let PlayerInner { index, playlist, config, .. } = &*self.inner;
+		let Inner { index, playlist, config, .. } = &*self.inner;
 
 		let mut loaded_index = index.load(Ordering::Relaxed);
 		if config.shuffle.load(Ordering::Relaxed) {
