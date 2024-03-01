@@ -13,6 +13,11 @@ use rand::Rng;
 
 use tokio::io::AsyncReadExt;
 
+use crate::{
+	audio::{self, AudioReader},
+	cmd, CONFIG,
+};
+
 #[derive(Clone)]
 pub struct Player {
 	inner: Arc<Inner>,
@@ -23,12 +28,6 @@ pub struct Inner {
 	index: AtomicUsize,
 	tx: tokio::sync::broadcast::Sender<Bytes>,
 	task_control_tx: tokio::sync::watch::Sender<TaskControlMessage>,
-	config: Config,
-}
-
-pub struct Config {
-	shuffle: AtomicBool,
-	bitrate_k: AtomicUsize,
 }
 
 #[derive(Clone, Copy)]
@@ -59,7 +58,6 @@ impl Player {
 				index: index.into(),
 				tx,
 				task_control_tx: tokio::sync::watch::channel(TaskControlMessage::Play).0,
-				config: Config { shuffle: false.into(), bitrate_k: 128.into() },
 			}),
 		};
 
@@ -94,64 +92,27 @@ impl Player {
 	}
 
 	async fn play_next(&self) {
-		use tokio::process::Command;
-
-		let Inner { playlist, index, tx, config, .. } = &*self.inner;
+		let Inner { playlist, index, tx, .. } = &*self.inner;
 		let index = index.load(Ordering::Relaxed);
 		println!("playing: {:?}", playlist[index].file_name().unwrap());
 
-		let mut handle = Command::new("ffmpeg")
-			.args(["-hide_banner", "-loglevel", "error"])
-			.args(["-re", "-threads", "1", "-i"])
-			.arg(&playlist[index])
-			.args([
-				"-c:a",
-				"mp3",
-				"-b:a",
-				&format!("{}k", config.bitrate_k.load(Ordering::Relaxed)),
-				"-write_xing",
-				"0",
-				"-id3v2_version",
-				"0",
-				"-map_metadata",
-				"-1",
-				"-vn",
-				"-f",
-				"mp3",
-				"-",
-			])
-			.stdout(Stdio::piped())
-			.stderr(Stdio::piped())
-			.stdin(Stdio::null())
-			.spawn()
-			.unwrap();
-		let mut stdout = handle.stdout.take().unwrap();
-		let mut stderr = handle.stderr.take().unwrap();
+		let mut reader = audio::FFMpegAudioReader::open(&playlist[index]);
 
 		let buf = &mut [0u8; 4096];
-		let err_buf = &mut String::new();
-		while let Ok(read) = stdout.read(buf).await {
-			if read == 0 {
-				stderr.read_to_string(err_buf).await.unwrap();
-				if !err_buf.is_empty() {
-					println!("ffmpeg error: {err_buf}");
-					std::process::exit(1);
+		loop {
+			let data = reader.read_data(buf).await.unwrap();
+			match data {
+				audio::Data::Audio(0) => break,
+				audio::Data::Audio(read) => {
+					let _ = tx.send(Bytes::copy_from_slice(&buf[..read]));
 				}
-				break;
+				audio::Data::Error(err) => {
+					println!("ffmpeg error: {}", err);
+					break;
+				}
 			}
-
-			let _ = tx.send(Bytes::copy_from_slice(&buf[..read]));
 		}
-		handle.wait().await.unwrap();
 		self.next();
-	}
-
-	pub fn set_shuffle(&self, shuffle: bool) {
-		self.inner.config.shuffle.store(shuffle, Ordering::Relaxed);
-	}
-
-	pub fn set_bitrate(&self, bitrate: usize) {
-		self.inner.config.bitrate_k.store(bitrate, Ordering::Relaxed);
 	}
 
 	pub fn set_index(&mut self, index: usize) {
@@ -175,10 +136,11 @@ impl Player {
 	}
 
 	fn next(&self) {
-		let Inner { index, playlist, config, .. } = &*self.inner;
+		let Inner { index, playlist, .. } = &*self.inner;
+		let shuffle = CONFIG.shuffle;
 
 		let mut loaded_index = index.load(Ordering::Relaxed);
-		if config.shuffle.load(Ordering::Relaxed) {
+		if shuffle {
 			let mut rng = rand::thread_rng();
 			loaded_index = loop {
 				let new_index = rng.gen_range(0..playlist.len());
