@@ -69,7 +69,8 @@ pub struct CliConfig {
 	#[clap(
 		long = "generate-config",
 		value_name = "FILE",
-		help = "Overwrite existing or create a new config file. Optionally pass a path to the config file to be created (not directory).",
+		help = "Overwrite existing or create a new config file. Optionally pass a path to the config file to be created (not directory).
+Doesn't work right yet.",
 		default_missing_value = "",
 		num_args(0..=1),
 		group = "config",
@@ -135,7 +136,8 @@ Optionally pass a path to the config file to be created/read (not directory).",
 		default_missing_value = "true"
 	)]
 	pub transcode_all: bool,
-	#[clap(long, help = "The root directory to recursively search for music.")]
+	#[clap(long, help = "The root directory to recursively search for music.
+Note: --use-config allows to specify multiple root directories.")]
 	pub root: PathBuf,
 	#[command(flatten, help = "Optionally include or exclude directories or files.")]
 	pub mode: Option<DirectoryConfigModeCli>,
@@ -169,9 +171,9 @@ impl FromStr for Bitrate {
 #[derive(Debug, Serialize, Deserialize, clap::Args)]
 #[group(required = false, multiple = false)]
 pub struct DirectoryConfigModeCli {
-	#[clap(long)]
+	#[clap(long, help = "Include these directories or files.")]
 	include: Vec<PathBuf>,
-	#[clap(long)]
+	#[clap(long, help = "Exclude these directories or files.")]
 	exclude: Vec<PathBuf>,
 }
 
