@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::{
+	fmt::{Display, Formatter},
 	num::{NonZeroU32, NonZeroUsize},
-	path::PathBuf,
+	path::{Path, PathBuf},
 	str::FromStr,
 };
 
@@ -18,22 +19,72 @@ pub struct Config {
 	pub mediainfo_history: NonZeroUsize,
 }
 
-#[derive(Debug, Serialize, Deserialize, clap::Parser)]
-pub struct CliConfig {
-	// these two are parsed separately
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum UseConfigArg {
+	Default,
+	Custom(PathBuf),
+}
+
+impl FromStr for UseConfigArg {
+	type Err = String;
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		if s.is_empty() {
+			Ok(Self::Default)
+		} else {
+			Ok(Self::Custom(PathBuf::from(s)))
+		}
+	}
+}
+
+impl Display for UseConfigArg {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		match self {
+			Self::Default => write!(f, "Default"),
+			Self::Custom(x) => write!(f, "Custom({})", x.display()),
+		}
+	}
+}
+
+#[derive(clap::Parser, Debug)]
+pub struct PreCliConfig {
 	#[clap(
 		long = "generate-config",
-		help = "Overwrite existing or create a new config file.",
-		default_value_t = false
+		default_missing_value = "",
+		num_args(0..=1),
 	)]
-	_generate_config: bool,
+	pub generate_config: Option<UseConfigArg>,
 	#[clap(
 		long = "use-config",
-		long_help = "Use the config file instead of the command line. Generates a new config if none exists. All other arguments are ignored if this is present.",
-		default_value_t = false
+		default_missing_value = "",
+		num_args(0..=1),
 	)]
-	// these aren't
-	_use_config: bool,
+	pub use_config: Option<UseConfigArg>,
+}
+
+#[derive(Debug, Serialize, Deserialize, clap::Parser)]
+pub struct CliConfig {
+	// these are here just to appear in --help
+	#[clap(
+		long = "generate-config",
+		value_name = "FILE",
+		help = "Overwrite existing or create a new config file. Optionally pass a path to the config file to be created (not directory).",
+		default_missing_value = "",
+		num_args(0..=1),
+		group = "config",
+	)]
+	_generate: Option<UseConfigArg>,
+	#[clap(
+		long = "use-config",
+		value_name = "FILE",
+		long_help = "Use the config file instead of the command line. Generates a new config if none exists.
+All arguments except '--generate-config' are ignored if this is present.
+Optionally pass a path to the config file to be created/read (not directory).",
+		default_missing_value = "",
+		num_args(0..=1),
+		group = "config",
+	)]
+	_use: Option<UseConfigArg>,
+
 	#[clap(long, help = "The host to bind to.", default_value = "127.0.0.1")]
 	pub host: String,
 	#[clap(long, default_value_t = 9005)]
@@ -68,6 +119,7 @@ pub struct CliConfig {
 		value_name = "SIZE",
 		help = "The size of song history to keep track of. Must be greater than 0.",
 		default_value = "16",
+		group = "mediainfo",
 		requires = "mediainfo"
 	)]
 	pub mediainfo_history: NonZeroUsize,
@@ -210,19 +262,16 @@ impl From<toml::de::Error> for Error {
 	}
 }
 
-pub fn generate_or_load() -> Result<Config, Error> {
-	let path = config_path();
-
+pub fn generate_or_load(path: &Path) -> Result<Config, Error> {
 	if !path.exists() {
-		generate_config_file()
+		generate_config_file(path)
 	} else {
 		let x = std::fs::read_to_string(path).unwrap();
 		Ok(toml::from_str(&x)?)
 	}
 }
 
-pub fn generate_config_file() -> Result<Config, Error> {
-	let path = config_path();
+pub fn generate_config_file(path: &Path) -> Result<Config, Error> {
 	if !path.exists() {
 		path.parent()
 			.ok_or_else(|| {
@@ -231,7 +280,7 @@ pub fn generate_config_file() -> Result<Config, Error> {
 			.and_then(std::fs::create_dir_all)?;
 	}
 	let config = Config::default();
-	std::fs::write(&path, toml::to_string(&config).unwrap())?;
+	std::fs::write(path, toml::to_string(&config).unwrap())?;
 
 	Ok(config)
 }

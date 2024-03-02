@@ -12,9 +12,9 @@ use axum::{
 	body::Body, debug_handler, extract::State, http::header, response::IntoResponse, routing::get,
 	Router,
 };
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use player::Player;
-use std::sync::Arc;
+use std::{ffi::OsString, sync::Arc};
 
 #[tokio::main]
 async fn main() {
@@ -34,28 +34,10 @@ async fn main() {
 		}
 	}
 
-	if std::env::args().any(|x| x == "--generate-config") {
-		if let Err(error) = config::generate_config_file() {
-			match error {
-				config::Error::Io(e) => println!("Could not generate config file: {}", e),
-				config::Error::Parse(_) => unreachable!(),
-			}
-		}
-	};
-	let config: Arc<config::Config> = if std::env::args().any(|x| x == "--use-config") {
-		println!("Loading config from {}", config::config_path().display());
-		match config::generate_or_load() {
-			Ok(x) => Arc::new(x),
-			Err(error) => {
-				match error {
-					config::Error::Io(e) => println!("Could not generate or load config: {}", e),
-					config::Error::Parse(e) => println!("Could not parse config:\n{}", e),
-				}
-				return;
-			}
-		}
-	} else {
-		Arc::new(config::CliConfig::parse().into())
+	// i dont want to see this code
+	// into a function it goes
+	let Some(config) = config_shit() else {
+		return;
 	};
 
 	let port = config.port;
@@ -94,6 +76,51 @@ async fn main() {
 	println!("Listening on port {}", port);
 
 	axum::serve(listener, app).await.unwrap();
+}
+
+fn config_shit() -> Option<Arc<config::Config>> {
+	let pre_config = config::PreCliConfig::try_parse();
+	let mut use_config = None;
+	if let Ok(config::PreCliConfig { generate_config, use_config: use_config_arg, .. }) = pre_config
+	{
+		if let Some(x) = generate_config {
+			let path = match x {
+				config::UseConfigArg::Custom(path) => path,
+				config::UseConfigArg::Default => config::config_path(),
+			};
+			if let Err(error) = config::generate_config_file(&path) {
+				match error {
+					config::Error::Io(e) => println!("Could not generate config file: {}", e),
+					config::Error::Parse(_) => unreachable!(),
+				}
+			} else {
+				println!("Config file generated in {}", path.display());
+			}
+		}
+		use_config = use_config_arg;
+	}
+
+	let config: Arc<config::Config> = if let Some(use_config) = use_config {
+		let path = match use_config {
+			config::UseConfigArg::Custom(path) => path,
+			config::UseConfigArg::Default => config::config_path(),
+		};
+		println!("Loading config from {}", path.display());
+		match config::generate_or_load(&path) {
+			Ok(x) => Arc::new(x),
+			Err(error) => {
+				match error {
+					config::Error::Io(e) => println!("Could not generate or load config: {}", e),
+					config::Error::Parse(e) => println!("Could not parse config:\n{}", e),
+				}
+				return None;
+			}
+		}
+	} else {
+		Arc::new(config::CliConfig::parse().into())
+	};
+
+	Some(config)
 }
 
 fn define_routes(r: Router<Player>, config: &Arc<config::Config>) -> Router<Player> {
