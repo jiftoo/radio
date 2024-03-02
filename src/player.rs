@@ -75,14 +75,14 @@ impl Player {
 					match msg {
 						TaskControlMessage::Play => loop {
 							tokio::select! {
-								_ = self.play_next() => (),
 								_ = rx.changed() => break,
+								_ = self.play_next() => (),
 							}
 						},
 						TaskControlMessage::Pause => {
 							tokio::select! {
-								_ = tokio::time::sleep(Duration::from_secs(999)) => (),
 								_ = rx.changed() => break,
+								_ = tokio::time::sleep(Duration::from_secs(999)) => (),
 							}
 						}
 					}
@@ -165,7 +165,7 @@ impl Player {
 			let mut rng = rand::thread_rng();
 			loaded_index = loop {
 				let new_index = rng.gen_range(0..playlist.len());
-				if new_index != loaded_index {
+				if new_index != loaded_index || playlist.len() == 1 {
 					break new_index;
 				}
 			}

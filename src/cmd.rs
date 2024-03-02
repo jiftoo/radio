@@ -1,4 +1,7 @@
-use std::{path::Path, process::Stdio};
+use std::{
+	path::{Path, PathBuf},
+	process::Stdio,
+};
 
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
@@ -44,6 +47,7 @@ pub fn spawn_ffmpeg(input: &Path, bitrate_bps: u32, copy_codec: bool) -> tokio::
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Mediainfo {
+	pub filename: PathBuf,
 	pub title: Option<String>,
 	pub album: Option<String>,
 	pub artist: Option<String>,
@@ -63,7 +67,7 @@ pub async fn mediainfo(input: &Path) -> Result<Mediainfo, String> {
 			"-select_streams",
 			"a:0",
 			"-show_entries",
-			"format_tags:stream=codec_name",
+			"format_tags:stream=codec_name:format=filename",
 			"-of",
 			"json=c=1",
 		])
@@ -92,6 +96,7 @@ pub async fn mediainfo(input: &Path) -> Result<Mediainfo, String> {
 
 	#[derive(Deserialize)]
 	struct PFormat {
+		filename: PathBuf,
 		tags: PMediainfo,
 	}
 
@@ -115,6 +120,7 @@ pub async fn mediainfo(input: &Path) -> Result<Mediainfo, String> {
 	};
 	let [stream] = output.streams;
 	Ok(Mediainfo {
+		filename: output.format.filename.file_name().unwrap_or_default().into(),
 		title: output.format.tags.title,
 		album: output.format.tags.album,
 		artist: output.format.tags.artist,
