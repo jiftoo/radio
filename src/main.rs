@@ -9,11 +9,12 @@ mod files;
 mod player;
 
 use axum::{
-	body::Body, debug_handler, extract::State, response::IntoResponse, routing::get, Router,
+	body::Body, debug_handler, extract::State, http::header, response::IntoResponse, routing::get,
+	Json, Router,
 };
 use clap::Parser;
 use player::Player;
-use std::ops::Deref;
+use std::{ops::Deref, sync::Arc};
 use tokio::sync::OnceCell;
 
 pub struct DerefOnceCell<T>(OnceCell<T>);
@@ -93,7 +94,12 @@ async fn main() {
 }
 
 fn define_routes(r: Router<Player>) -> Router<Player> {
-	r.route("/", get(stream))
+	let r = r.route("/", get(stream));
+	if CONFIG.enable_mediainfo {
+		r.route("/mediainfo", get(mediainfo))
+	} else {
+		r
+	}
 }
 
 #[debug_handler]
@@ -110,4 +116,11 @@ async fn stream(State(player): State<Player>) -> Result<impl IntoResponse, Strin
 	let rx = player.subscribe();
 
 	Ok(spawn_listener(rx))
+}
+
+async fn mediainfo(State(player): State<Player>) -> impl IntoResponse {
+	(
+		[(header::CONTENT_TYPE, "application/json")],
+		serde_json::to_string(&*player.mediainfo().await).unwrap(),
+	)
 }

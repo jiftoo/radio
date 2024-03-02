@@ -42,7 +42,7 @@ pub fn spawn_ffmpeg(input: &Path, bitrate_bps: u32, copy_codec: bool) -> tokio::
 	.unwrap()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Mediainfo {
 	pub title: Option<String>,
 	pub album: Option<String>,

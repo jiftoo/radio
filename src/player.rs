@@ -9,6 +9,7 @@ use std::{
 
 use axum::body::Bytes;
 use rand::Rng;
+use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::{
 	audio::{self, AudioReader},
@@ -23,6 +24,7 @@ pub struct Player {
 pub struct Inner {
 	playlist: Box<[PathBuf]>,
 	index: AtomicUsize,
+	mediainfo: RwLock<cmd::Mediainfo>,
 	tx: tokio::sync::broadcast::Sender<Bytes>,
 	task_control_tx: tokio::sync::watch::Sender<TaskControlMessage>,
 }
@@ -53,6 +55,7 @@ impl Player {
 			inner: Arc::new(Inner {
 				playlist: playlist.into_boxed_slice(),
 				index: index.into(),
+				mediainfo: Default::default(),
 				tx,
 				task_control_tx: tokio::sync::watch::channel(TaskControlMessage::Play).0,
 			}),
@@ -101,11 +104,16 @@ impl Player {
 			Box::new(audio::FFMpegAudioReader::new(input, CONFIG.bitrate, copy_codec));
 
 		println!(
-			"playing: {:?} (codec: {}, copy: {})",
+			"{:?}\t(codec: {}, copy: {})",
 			playlist[index].file_name().unwrap(),
 			mediainfo.codec,
 			if copy_codec { "yes" } else { "no" }
 		);
+
+		{
+			let x = &mut *self.inner.mediainfo.write().await;
+			let _ = std::mem::replace(x, mediainfo);
+		}
 
 		let buf = &mut [0u8; 4096];
 		loop {
@@ -142,6 +150,10 @@ impl Player {
 
 	pub fn subscribe(&self) -> PlayerRx {
 		self.inner.tx.subscribe()
+	}
+
+	pub async fn mediainfo(&self) -> RwLockReadGuard<cmd::Mediainfo> {
+		self.inner.mediainfo.read().await
 	}
 
 	fn next(&self) {
