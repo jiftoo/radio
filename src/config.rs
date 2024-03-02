@@ -20,12 +20,20 @@ pub struct Config {
 
 #[derive(Debug, Serialize, Deserialize, clap::Parser)]
 pub struct CliConfig {
+	// these two are parsed separately
 	#[clap(
-		long = "use-config",
-		help = "Use the config file instead of the command line. All other arguments are ignored in that case.",
+		long = "generate-config",
+		help = "Overwrite existing or create a new config file.",
 		default_value_t = false
 	)]
-	use_config: bool,
+	_generate_config: bool,
+	#[clap(
+		long = "use-config",
+		long_help = "Use the config file instead of the command line. Generates a new config if none exists. All other arguments are ignored if this is present.",
+		default_value_t = false
+	)]
+	// these aren't
+	_use_config: bool,
 	#[clap(long, help = "The host to bind to.", default_value = "127.0.0.1")]
 	pub host: String,
 	#[clap(long, default_value_t = 9005)]
@@ -33,7 +41,8 @@ pub struct CliConfig {
 	#[clap(
 		long,
 		action,
-		help = "Enable /dashboard endpoint. Lets you view some statistics.",
+		// help = "Enable /dashboard endpoint. Lets you view some statistics.",
+		help = "not implemented.",
 		default_value_t = false
 	)]
 	pub enable_webui: bool,
@@ -184,30 +193,62 @@ pub struct DirectoryConfig {
 	pub mode: DirectoryConfigMode,
 }
 
-pub fn create_and_load() -> Config {
-	let path = {
-		#[cfg(target_os = "linux")]
-		if is_root::is_root() {
-			PathBuf::from("/etc/radio/config.toml")
-		} else {
-			PathBuf::from("~/.config/radio/config.toml")
-		}
-		#[cfg(target_os = "windows")]
-		if is_root::is_root() {
-			windirs::known_folder_path(windirs::FolderId::RoamingAppData)
-		} else {
-			windirs::known_folder_path(windirs::FolderId::LocalAppData)
-		}
-		.unwrap()
-		.join("radio/config.toml")
-	};
+pub enum Error {
+	Parse(String),
+	Io(std::io::Error),
+}
+
+impl From<std::io::Error> for Error {
+	fn from(value: std::io::Error) -> Self {
+		Self::Io(value)
+	}
+}
+
+impl From<toml::de::Error> for Error {
+	fn from(value: toml::de::Error) -> Self {
+		Self::Parse(value.to_string())
+	}
+}
+
+pub fn generate_or_load() -> Result<Config, Error> {
+	let path = config_path();
 
 	if !path.exists() {
-		std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-		let config = Config::default();
-		std::fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
-		config
+		generate_config_file()
 	} else {
-		toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+		let x = std::fs::read_to_string(path).unwrap();
+		Ok(toml::from_str(&x)?)
 	}
+}
+
+pub fn generate_config_file() -> Result<Config, Error> {
+	let path = config_path();
+	if !path.exists() {
+		path.parent()
+			.ok_or_else(|| {
+				std::io::Error::new(std::io::ErrorKind::InvalidData, "No parent directory")
+			})
+			.and_then(std::fs::create_dir_all)?;
+	}
+	let config = Config::default();
+	std::fs::write(&path, toml::to_string(&config).unwrap())?;
+
+	Ok(config)
+}
+
+pub fn config_path() -> PathBuf {
+	#[cfg(target_os = "linux")]
+	if is_root::is_root() {
+		PathBuf::from("/etc/radio/config.toml")
+	} else {
+		PathBuf::from("~/.config/radio/config.toml")
+	}
+	#[cfg(target_os = "windows")]
+	if is_root::is_root() {
+		windirs::known_folder_path(windirs::FolderId::RoamingAppData)
+	} else {
+		windirs::known_folder_path(windirs::FolderId::LocalAppData)
+	}
+	.unwrap()
+	.join("radio/config.toml")
 }

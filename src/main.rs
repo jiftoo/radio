@@ -1,6 +1,6 @@
 #![warn(clippy::nursery)]
 #![deny(clippy::semicolon_if_nothing_returned)]
-// #![allow(unused)]
+#![allow(unused)]
 
 mod audio;
 mod cmd;
@@ -34,12 +34,29 @@ async fn main() {
 		}
 	}
 
-	let config: Arc<config::Config> =
-		if std::env::args().nth(1).map(|x| x == "--use-config").unwrap_or(false) {
-			Arc::new(config::create_and_load())
-		} else {
-			Arc::new(config::CliConfig::parse().into())
-		};
+	if std::env::args().any(|x| x == "--generate-config") {
+		if let Err(error) = config::generate_config_file() {
+			match error {
+				config::Error::Io(e) => println!("Could not generate config file: {}", e),
+				config::Error::Parse(_) => unreachable!(),
+			}
+		}
+	};
+	let config: Arc<config::Config> = if std::env::args().any(|x| x == "--use-config") {
+		println!("Loading config from {}", config::config_path().display());
+		match config::generate_or_load() {
+			Ok(x) => Arc::new(x),
+			Err(error) => {
+				match error {
+					config::Error::Io(e) => println!("Could not generate or load config: {}", e),
+					config::Error::Parse(e) => println!("Could not parse config:\n{}", e),
+				}
+				return;
+			}
+		}
+	} else {
+		Arc::new(config::CliConfig::parse().into())
+	};
 
 	let port = config.port;
 	let path = config.dirs[0].root.clone();
