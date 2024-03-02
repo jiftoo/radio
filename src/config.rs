@@ -1,10 +1,5 @@
-use clap::Arg;
 use serde::{Deserialize, Serialize};
-use std::{
-	num::{NonZeroU32, ParseIntError},
-	path::PathBuf,
-	str::FromStr,
-};
+use std::{num::NonZeroU32, path::PathBuf, str::FromStr};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
@@ -13,9 +8,8 @@ pub struct Config {
 	pub dirs: Box<[DirectoryConfig]>,
 	pub enable_webui: bool,
 	pub shuffle: bool,
-	#[cfg(feature = "ffmpeg")]
-	pub transcode_non_mp3: TranscodeNonMp3Config,
-	#[cfg(feature = "mediainfo")]
+	pub bitrate: u32,
+	pub transcode: bool,
 	pub enable_mediainfo: bool,
 }
 
@@ -23,36 +17,43 @@ pub struct Config {
 pub struct CliConfig {
 	#[clap(
 		long = "use-config",
-		help = "Use the config file instead of the command line. All other arguments are ignored in that case."
+		help = "Use the config file instead of the command line. All other arguments are ignored in that case.",
+		default_value_t = false
 	)]
 	use_config: bool,
-	#[clap(long, help = "The host to bind to.")]
+	#[clap(long, help = "The host to bind to.", default_value = "127.0.0.1")]
 	pub host: String,
-	#[clap(long)]
+	#[clap(long, default_value_t = 9005)]
 	pub port: u16,
-	#[clap(long, action, help = "Enable /dashboard endpoint. Lets you view some statistics.")]
-	pub enable_webui: bool,
-	#[clap(long, action, help = "Choose next song randomly.")]
-	pub shuffle: bool,
-	#[cfg(feature = "ffmpeg")]
 	#[clap(
 		long,
 		action,
-		help = "Serve all files as MP3 with specified bitrate. Runs ffmpeg in the background."
+		help = "Enable /dashboard endpoint. Lets you view some statistics.",
+		default_value_t = false
 	)]
-	pub transcode_non_mp3: bool,
+	pub enable_webui: bool,
+	#[clap(long, action, help = "Choose next song randomly.", default_value_t = true)]
+	pub shuffle: bool,
 	#[clap(
 		long = "bitrate",
-		help = "The bitrate to use for transcoding. Plain value for bps and suffixed with 'k' for kbps."
+		help = "The bitrate to use for transcoding. Plain value for bps and suffixed with 'k' for kbps.",
+		default_value = "128k"
 	)]
-	pub transcode_bitrate_k: Option<Bitrate>,
-	#[cfg(feature = "mediainfo")]
+	pub transcode_bitrate: Bitrate,
 	#[clap(
 		long,
 		action,
-		help = "Enable /mediainfo endpoint. It serves metadata for the current song in JSON format."
+		help = "Enable /mediainfo endpoint. It serves metadata for the current song in JSON format.",
+		default_value_t = true
 	)]
 	pub enable_mediainfo: bool,
+	#[clap(
+		long,
+		action,
+		help = "Transcode files that can be sent without transcoding. Set to true if you want to reduce bandwidth a little.",
+		default_value_t = false
+	)]
+	pub transcode: bool,
 	#[clap(long, help = "The root directory to recursively search for music.")]
 	pub root: PathBuf,
 	#[command(flatten, help = "Optionally include or exclude directories or files.")]
@@ -61,13 +62,13 @@ pub struct CliConfig {
 
 #[derive(Debug, Serialize, Deserialize, clap::Parser, Clone)]
 pub struct Bitrate {
-	pub k: NonZeroU32,
+	pub bits_per_second: NonZeroU32,
 }
 
 impl FromStr for Bitrate {
 	type Err = String;
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		let k = s.parse::<NonZeroU32>().map_err(|x| x.to_string()).or_else(|x| {
+		let bits_per_second = s.parse::<NonZeroU32>().map_err(|x| x.to_string()).or_else(|x| {
 			let last_char =
 				s.chars().last().ok_or_else(|| "Empty string".to_string())?.to_ascii_lowercase();
 
@@ -80,7 +81,7 @@ impl FromStr for Bitrate {
 				Err(x)
 			}
 		})?;
-		Ok(Self { k })
+		Ok(Self { bits_per_second })
 	}
 }
 
@@ -127,12 +128,8 @@ impl From<CliConfig> for Config {
 			dirs: dir.into_boxed_slice(),
 			enable_webui: cli.enable_webui,
 			shuffle: cli.shuffle,
-			#[cfg(feature = "ffmpeg")]
-			transcode_non_mp3: TranscodeNonMp3Config {
-				enabled: cli.transcode_non_mp3,
-				bitrate_k: cli.transcode_bitrate_k.map(|x| x.k.get()).unwrap_or(128),
-			},
-			#[cfg(feature = "mediainfo")]
+			bitrate: cli.transcode_bitrate.bits_per_second.get(),
+			transcode: cli.transcode,
 			enable_mediainfo: cli.enable_mediainfo,
 		}
 	}
@@ -149,9 +146,8 @@ impl Default for Config {
 			}]),
 			shuffle: true,
 			enable_webui: true,
-			#[cfg(feature = "ffmpeg")]
-			transcode_non_mp3: TranscodeNonMp3Config { enabled: true, bitrate_k: 128 },
-			#[cfg(feature = "mediainfo")]
+			bitrate: 128_000,
+			transcode: false,
 			enable_mediainfo: true,
 		}
 	}
@@ -169,13 +165,6 @@ pub enum DirectoryConfigMode {
 pub struct DirectoryConfig {
 	pub root: PathBuf,
 	pub mode: DirectoryConfigMode,
-}
-
-#[cfg(feature = "ffmpeg")]
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct TranscodeNonMp3Config {
-	pub enabled: bool,
-	pub bitrate_k: u32,
 }
 
 pub fn create_and_load() -> Config {

@@ -1,7 +1,7 @@
 use std::{io::ErrorKind, process::Command};
 
 fn main() {
-	let generated_warnings = check_exec("ffmpeg") || check_exec("mediainfo");
+	let generated_warnings = (check_exec("ffmpeg")) || (check_exec("ffprobe"));
 
 	if generated_warnings {
 		println!(

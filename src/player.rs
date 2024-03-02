@@ -1,8 +1,7 @@
 use std::{
 	path::{Path, PathBuf},
-	process::Stdio,
 	sync::{
-		atomic::{AtomicBool, AtomicUsize, Ordering},
+		atomic::{AtomicUsize, Ordering},
 		Arc,
 	},
 	time::Duration,
@@ -10,8 +9,6 @@ use std::{
 
 use axum::body::Bytes;
 use rand::Rng;
-
-use tokio::io::AsyncReadExt;
 
 use crate::{
 	audio::{self, AudioReader},
@@ -94,9 +91,21 @@ impl Player {
 	async fn play_next(&self) {
 		let Inner { playlist, index, tx, .. } = &*self.inner;
 		let index = index.load(Ordering::Relaxed);
-		println!("playing: {:?}", playlist[index].file_name().unwrap());
 
-		let mut reader = audio::FFMpegAudioReader::open(&playlist[index]);
+		let input = &playlist[index];
+
+		let mediainfo = cmd::mediainfo(input).await.unwrap();
+		let copy_codec = mediainfo.codec == "mp3" && !CONFIG.transcode;
+
+		let mut reader: Box<dyn AudioReader> =
+			Box::new(audio::FFMpegAudioReader::new(input, CONFIG.bitrate, copy_codec));
+
+		println!(
+			"playing: {:?} (codec: {}, copy: {})",
+			playlist[index].file_name().unwrap(),
+			mediainfo.codec,
+			if copy_codec { "yes" } else { "no" }
+		);
 
 		let buf = &mut [0u8; 4096];
 		loop {

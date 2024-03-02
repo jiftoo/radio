@@ -11,15 +11,9 @@ mod player;
 use axum::{
 	body::Body, debug_handler, extract::State, response::IntoResponse, routing::get, Router,
 };
-use clap::{Parser, Subcommand};
+use clap::Parser;
 use player::Player;
-use std::{
-	error::Error,
-	fmt::{Debug, Display, Formatter},
-	mem::MaybeUninit,
-	ops::Deref,
-	path::{Path, PathBuf},
-};
+use std::ops::Deref;
 use tokio::sync::OnceCell;
 
 pub struct DerefOnceCell<T>(OnceCell<T>);
@@ -35,6 +29,22 @@ static CONFIG: DerefOnceCell<config::Config> = DerefOnceCell(OnceCell::const_new
 
 #[tokio::main]
 async fn main() {
+	match cmd::check_executables() {
+		(true, _) => {}
+		(false, missing) => {
+			println!(
+				"Could not execute: {}",
+				missing.into_iter().map(|x| format!("{:?}", x.0)).collect::<Vec<_>>().join(", ")
+			);
+			let x = std::env::current_dir()
+				.map(|x| format!(" ({:?})", x.display()))
+				.unwrap_or_default();
+			println!("Make sure ffmpeg is installed and accessible. Or just put those two in the current directory{x}.");
+
+			return;
+		}
+	}
+
 	let cfg: config::Config =
 		if std::env::args().nth(1).map(|x| x == "--use-config").unwrap_or(false) {
 			config::create_and_load()
@@ -94,12 +104,10 @@ async fn stream(State(player): State<Player>) -> Result<impl IntoResponse, Strin
 
 		let stream = tokio_stream::wrappers::BroadcastStream::new(rx);
 
-		println!("sending body");
 		(headers, Body::from_stream(stream).into_response())
 	}
 
 	let rx = player.subscribe();
-	println!("subscribed");
 
 	Ok(spawn_listener(rx))
 }

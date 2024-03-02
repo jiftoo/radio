@@ -1,11 +1,10 @@
-use std::{path::Path, process::Stdio, sync::atomic::Ordering};
+use std::{path::Path, process::Stdio};
 
+use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
-use crate::player;
-
 pub fn check_executables() -> (bool, Vec<(String, bool)>) {
-	let info = ["ffmpeg", "mediainfo"]
+	let info = ["ffmpeg", "ffprobe"]
 		.into_iter()
 		.map(|x| {
 			(x.to_string(), { std::process::Command::new(x).spawn().map(|mut x| x.kill()).is_ok() })
@@ -14,49 +13,60 @@ pub fn check_executables() -> (bool, Vec<(String, bool)>) {
 	(info.iter().all(|x| x.1), info)
 }
 
-#[cfg(feature = "ffmpeg")]
-pub fn spawn_ffmpeg(input: &Path) -> tokio::process::Child {
-	use crate::DerefOnceCell;
-
-	Command::new("ffmpeg")
-		.args(["-hide_banner", "-loglevel", "error"])
+pub fn spawn_ffmpeg(input: &Path, bitrate_bps: u32, copy_codec: bool) -> tokio::process::Child {
+	let mut cmd = Command::new("ffmpeg");
+	cmd.args(["-hide_banner", "-loglevel", "error"])
 		.args(["-re", "-threads", "1", "-i"])
-		.arg(input)
-		.args([
-			"-c:a",
-			"mp3",
-			"-b:a",
-			&format!("{}k", crate::CONFIG.transcode_non_mp3.bitrate_k),
-			"-write_xing",
-			"0",
-			"-id3v2_version",
-			"0",
-			"-map_metadata",
-			"-1",
-			"-vn",
-			"-f",
-			"mp3",
-			"-",
-		])
-		.stdout(Stdio::piped())
-		.stderr(Stdio::piped())
-		.stdin(Stdio::null())
-		.spawn()
-		.unwrap()
+		.arg(input);
+	if copy_codec {
+		cmd.args(["-c:a", "copy"]);
+	} else {
+		cmd.args(["-c:a", "mp3", "-b:a", &bitrate_bps.to_string()]);
+	}
+	cmd.args([
+		"-write_xing",
+		"0",
+		"-id3v2_version",
+		"0",
+		"-map_metadata",
+		"-1",
+		"-vn",
+		"-f",
+		"mp3",
+		"-",
+	])
+	.stdout(Stdio::piped())
+	.stderr(Stdio::piped())
+	.stdin(Stdio::null())
+	.spawn()
+	.unwrap()
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Mediainfo {
 	pub title: Option<String>,
 	pub album: Option<String>,
-	pub album_performer: Option<String>,
+	pub artist: Option<String>,
+	pub album_artist: Option<String>,
+	pub publisher: Option<String>,
+	pub disc: Option<String>,
 	pub track: Option<String>,
-	pub performer: Option<String>,
 	pub genre: Option<String>,
+	pub codec: String,
 }
 
 pub async fn mediainfo(input: &Path) -> Result<Mediainfo, String> {
-	let child = Command::new("mediainfo")
-		.arg("--Output=General;%Title%,%Album%,%Album/Performer%,%Track%,%Performer%,%Genre%")
+	let child = Command::new("ffprobe")
+		.args([
+			"-loglevel",
+			"error",
+			"-select_streams",
+			"a:0",
+			"-show_entries",
+			"format_tags:stream=codec_name",
+			"-of",
+			"json=c=1",
+		])
 		.arg(input)
 		.stdout(Stdio::piped())
 		.stderr(Stdio::piped())
@@ -66,20 +76,53 @@ pub async fn mediainfo(input: &Path) -> Result<Mediainfo, String> {
 	let output = child.wait_with_output().await.unwrap();
 
 	if !output.status.success() {
-		return Err(format!("mediainfo failed: {}", String::from_utf8_lossy(&output.stderr)));
+		return Err(format!("ffprobe failed: {}", String::from_utf8_lossy(&output.stderr)));
 	}
 
-	let str = String::from_utf8_lossy(&output.stdout);
-	let mut info = str
-		.split(',')
-		.map(|x| x.trim().is_empty().then_some(None).unwrap_or_else(|| Some(x.to_string())));
+	#[derive(Deserialize)]
+	struct P {
+		streams: [PStreams; 1],
+		format: PFormat,
+	}
 
+	#[derive(Deserialize)]
+	struct PStreams {
+		codec_name: String,
+	}
+
+	#[derive(Deserialize)]
+	struct PFormat {
+		tags: PMediainfo,
+	}
+
+	#[derive(Deserialize)]
+	pub struct PMediainfo {
+		pub title: Option<String>,
+		pub album: Option<String>,
+		pub artist: Option<String>,
+		pub album_artist: Option<String>,
+		pub publisher: Option<String>,
+		pub disc: Option<String>,
+		pub track: Option<String>,
+		pub genre: Option<String>,
+	}
+
+	let output: P = match serde_json::from_str(&String::from_utf8_lossy(&output.stdout)) {
+		Ok(x) => x,
+		Err(e) => {
+			return Err(format!("ffprobe failed: {}\n", e));
+		}
+	};
+	let [stream] = output.streams;
 	Ok(Mediainfo {
-		title: info.next().unwrap(),
-		album: info.next().unwrap(),
-		album_performer: info.next().unwrap(),
-		track: info.next().unwrap(),
-		performer: info.next().unwrap(),
-		genre: info.next().unwrap(),
+		title: output.format.tags.title,
+		album: output.format.tags.album,
+		artist: output.format.tags.artist,
+		album_artist: output.format.tags.album_artist,
+		publisher: output.format.tags.publisher,
+		disc: output.format.tags.disc,
+		track: output.format.tags.track,
+		genre: output.format.tags.genre,
+		codec: stream.codec_name,
 	})
 }
