@@ -170,10 +170,10 @@ pub struct DirectoryConfig {
 pub fn create_and_load() -> Config {
 	let path = {
 		#[cfg(target_os = "linux")]
-		if is_root() {
-			PathBuf::new("/etc/radio/config.toml")
+		if is_root::is_root() {
+			PathBuf::from("/etc/radio/config.toml")
 		} else {
-			PathBuf::new("~/.config/radio/config.toml")
+			PathBuf::from("~/.config/radio/config.toml")
 		}
 		#[cfg(target_os = "windows")]
 		if is_root::is_root() {
