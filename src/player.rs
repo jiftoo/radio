@@ -98,11 +98,11 @@ impl Player {
 		let input = &playlist[index];
 
 		let Ok(mediainfo) = cmd::mediainfo(input).await else {
-			println!("{:?}\tbroken file.", playlist[index].file_name().unwrap());
+			println!("{:?}\tbroken file - skipping.", playlist[index].file_name().unwrap());
 			self.next();
 			return;
 		};
-		
+
 		let copy_codec = mediainfo.codec == "mp3" && !CONFIG.transcode;
 
 		let mut reader: Box<dyn AudioReader> =
