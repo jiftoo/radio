@@ -134,9 +134,17 @@ fn define_routes(r: Router<Player>, config: &Arc<config::Config>) -> Router<Play
 
 #[debug_handler]
 async fn stream(State(player): State<Player>) -> Result<impl IntoResponse, String> {
-	fn spawn_listener(rx: player::PlayerRx) -> impl IntoResponse {
+	fn spawn_listener(rx: player::PlayerRx, player_config: &config::Config) -> impl IntoResponse {
 		let mut headers = axum::http::HeaderMap::new();
 		headers.insert("Content-Type", "audio/mpeg".parse().unwrap());
+		headers.insert(
+			"x-bitrate",
+			if player_config.transcode_all {
+				player_config.bitrate.to_string().parse().unwrap()
+			} else {
+				"vary".parse().unwrap()
+			},
+		);
 
 		let stream = tokio_stream::wrappers::BroadcastStream::new(rx);
 
@@ -145,7 +153,7 @@ async fn stream(State(player): State<Player>) -> Result<impl IntoResponse, Strin
 
 	let rx = player.subscribe();
 
-	Ok(spawn_listener(rx))
+	Ok(spawn_listener(rx, player.config()))
 }
 
 async fn mediainfo(State(player): State<Player>) -> impl IntoResponse {

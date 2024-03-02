@@ -56,6 +56,7 @@ pub struct Mediainfo {
 	pub disc: Option<String>,
 	pub track: Option<String>,
 	pub genre: Option<String>,
+	pub bitrate: Option<u32>,
 	pub codec: String,
 }
 
@@ -67,7 +68,7 @@ pub async fn mediainfo(input: &Path) -> Result<Mediainfo, String> {
 			"-select_streams",
 			"a:0",
 			"-show_entries",
-			"format_tags:stream=codec_name:format=filename",
+			"format_tags:stream=codec_name,bit_rate:format=filename,bit_rate",
 			"-of",
 			"json=c=1",
 		])
@@ -92,11 +93,13 @@ pub async fn mediainfo(input: &Path) -> Result<Mediainfo, String> {
 	#[derive(Deserialize)]
 	struct PStreams {
 		codec_name: String,
+		bit_rate: Option<String>,
 	}
 
 	#[derive(Deserialize)]
 	struct PFormat {
 		filename: PathBuf,
+		bit_rate: Option<String>,
 		tags: PMediainfo,
 	}
 
@@ -129,6 +132,7 @@ pub async fn mediainfo(input: &Path) -> Result<Mediainfo, String> {
 		disc: output.format.tags.disc,
 		track: output.format.tags.track,
 		genre: output.format.tags.genre,
+		bitrate: stream.bit_rate.or(output.format.bit_rate).and_then(|x| x.parse().ok()),
 		codec: stream.codec_name,
 	})
 }

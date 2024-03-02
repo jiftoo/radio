@@ -130,7 +130,7 @@ impl Player {
 			return;
 		};
 
-		let copy_codec = mediainfo.codec == "mp3" && !config.transcode;
+		let copy_codec = !config.transcode_all && mediainfo.codec == "mp3";
 
 		let mut reader: Box<dyn AudioReader> =
 			Box::new(audio::FFMpegAudioReader::new(input, config.bitrate, copy_codec));
@@ -179,6 +179,10 @@ impl Player {
 
 	pub fn subscribe(&self) -> PlayerRx {
 		self.inner.tx.subscribe()
+	}
+
+	pub fn config(&self) -> &config::Config {
+		&self.inner.config
 	}
 
 	pub async fn read_mediainfo<R, F: Send + FnOnce(&[cmd::Mediainfo]) -> R>(&self, f: F) -> R {

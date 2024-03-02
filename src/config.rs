@@ -1,3 +1,4 @@
+use clap::ArgAction;
 use serde::{Deserialize, Serialize};
 use std::{
 	fmt::{Display, Formatter},
@@ -14,7 +15,7 @@ pub struct Config {
 	pub enable_webui: bool,
 	pub shuffle: bool,
 	pub bitrate: u32,
-	pub transcode: bool,
+	pub transcode_all: bool,
 	pub enable_mediainfo: bool,
 	pub mediainfo_history: NonZeroUsize,
 }
@@ -125,11 +126,14 @@ Optionally pass a path to the config file to be created/read (not directory).",
 	pub mediainfo_history: NonZeroUsize,
 	#[clap(
 		long,
-		action,
+		action(ArgAction::Set),
+		require_equals = true,
+		num_args(0..=1),
 		help = "Transcode files that can be sent without transcoding. Set to true if you want to reduce bandwidth a little.",
-		default_value_t = false
+		default_value_t = false,
+		default_missing_value = "true"
 	)]
-	pub transcode: bool,
+	pub transcode_all: bool,
 	#[clap(long, help = "The root directory to recursively search for music.")]
 	pub root: PathBuf,
 	#[command(flatten, help = "Optionally include or exclude directories or files.")]
@@ -205,7 +209,7 @@ impl From<CliConfig> for Config {
 			enable_webui: cli.enable_webui,
 			shuffle: cli.shuffle,
 			bitrate: cli.transcode_bitrate.bits_per_second.get(),
-			transcode: cli.transcode,
+			transcode_all: cli.transcode_all,
 			enable_mediainfo: cli.enable_mediainfo,
 			mediainfo_history: cli.mediainfo_history,
 		}
@@ -224,7 +228,7 @@ impl Default for Config {
 			shuffle: true,
 			enable_webui: true,
 			bitrate: 128_000,
-			transcode: false,
+			transcode_all: false,
 			enable_mediainfo: true,
 			mediainfo_history: NonZeroUsize::new(16).unwrap(),
 		}
