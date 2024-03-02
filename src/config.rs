@@ -63,6 +63,7 @@ pub struct PreCliConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize, clap::Parser)]
+#[command(version, about, long_about = None)]
 pub struct CliConfig {
 	// these are here just to appear in --help
 	#[clap(
