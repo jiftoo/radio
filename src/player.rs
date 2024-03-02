@@ -48,7 +48,8 @@ impl Player {
 			return Err(Error::EmptyPlayilist);
 		}
 
-		let index = 0;
+		let index =
+			if CONFIG.shuffle { rand::thread_rng().gen_range(0..playlist.len()) } else { 0 };
 		let tx = tokio::sync::broadcast::channel(4).0;
 
 		let player = Self {
