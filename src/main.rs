@@ -10,23 +10,11 @@ mod player;
 
 use axum::{
 	body::Body, debug_handler, extract::State, http::header, response::IntoResponse, routing::get,
-	Json, Router,
+	Router,
 };
 use clap::Parser;
 use player::Player;
-use std::{ops::Deref, sync::Arc};
-use tokio::sync::OnceCell;
-
-pub struct DerefOnceCell<T>(OnceCell<T>);
-
-impl<T> Deref for DerefOnceCell<T> {
-	type Target = T;
-	fn deref(&self) -> &Self::Target {
-		self.0.get().expect("DerefOnceCell uninitialized")
-	}
-}
-
-static CONFIG: DerefOnceCell<config::Config> = DerefOnceCell(OnceCell::const_new());
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() {
@@ -46,17 +34,15 @@ async fn main() {
 		}
 	}
 
-	let cfg: config::Config =
+	let config: Arc<config::Config> =
 		if std::env::args().nth(1).map(|x| x == "--use-config").unwrap_or(false) {
-			config::create_and_load()
+			Arc::new(config::create_and_load())
 		} else {
-			config::CliConfig::parse().into()
+			Arc::new(config::CliConfig::parse().into())
 		};
 
-	CONFIG.0.set(cfg).unwrap();
-
-	let port = CONFIG.port;
-	let path = CONFIG.dirs[0].root.clone();
+	let port = config.port;
+	let path = config.dirs[0].root.clone();
 
 	if !path.exists() {
 		println!("{} does not exist", path.display());
@@ -68,7 +54,7 @@ async fn main() {
 		return;
 	}
 
-	let player = match Player::new(files::collect(&path)) {
+	let player = match Player::new(files::collect(&path), config.clone()) {
 		Ok(player) => player,
 		Err(e) => {
 			println!("Player error: {:?}", e);
@@ -85,7 +71,7 @@ async fn main() {
 		println!(" ... and {} more", player.files().len() - take);
 	}
 
-	let app = define_routes(Router::new()).with_state(player.clone());
+	let app = define_routes(Router::new(), &config).with_state(player.clone());
 
 	let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await.unwrap();
 	println!("Listening on port {}", port);
@@ -93,9 +79,9 @@ async fn main() {
 	axum::serve(listener, app).await.unwrap();
 }
 
-fn define_routes(r: Router<Player>) -> Router<Player> {
+fn define_routes(r: Router<Player>, config: &Arc<config::Config>) -> Router<Player> {
 	let r = r.route("/", get(stream));
-	if CONFIG.enable_mediainfo {
+	if config.enable_mediainfo {
 		r.route("/mediainfo", get(mediainfo))
 	} else {
 		r
@@ -119,8 +105,6 @@ async fn stream(State(player): State<Player>) -> Result<impl IntoResponse, Strin
 }
 
 async fn mediainfo(State(player): State<Player>) -> impl IntoResponse {
-	(
-		[(header::CONTENT_TYPE, "application/json")],
-		serde_json::to_string(&*player.mediainfo().await).unwrap(),
-	)
+	let mediainfo_json = player.read_mediainfo(|x| serde_json::to_string(x).unwrap()).await;
+	([(header::CONTENT_TYPE, "application/json")], mediainfo_json)
 }

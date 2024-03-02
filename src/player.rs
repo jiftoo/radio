@@ -1,4 +1,5 @@
 use std::{
+	collections::VecDeque,
 	path::{Path, PathBuf},
 	sync::{
 		atomic::{AtomicUsize, Ordering},
@@ -9,11 +10,11 @@ use std::{
 
 use axum::body::Bytes;
 use rand::Rng;
-use tokio::sync::{RwLock, RwLockReadGuard};
+use tokio::sync::RwLock;
 
 use crate::{
 	audio::{self, AudioReader},
-	cmd, CONFIG,
+	cmd, config,
 };
 
 #[derive(Clone)]
@@ -21,12 +22,36 @@ pub struct Player {
 	inner: Arc<Inner>,
 }
 
+pub struct FixedDeque<T>(VecDeque<T>, usize);
+
+impl<T> FixedDeque<T> {
+	pub fn new(size: usize) -> Self {
+		Self(VecDeque::with_capacity(size), size)
+	}
+
+	pub fn push(&mut self, value: T) {
+		let x = &mut self.0;
+		if x.len() == self.1 {
+			x.pop_back();
+		}
+		x.push_front(value);
+		x.make_contiguous();
+	}
+
+	pub fn as_slice(&self) -> &[T] {
+		let (a, b) = self.0.as_slices();
+		assert!(b.is_empty());
+		a
+	}
+}
+
 pub struct Inner {
 	playlist: Box<[PathBuf]>,
 	index: AtomicUsize,
-	mediainfo: RwLock<cmd::Mediainfo>,
+	mediainfo: RwLock<FixedDeque<cmd::Mediainfo>>,
 	tx: tokio::sync::broadcast::Sender<Bytes>,
 	task_control_tx: tokio::sync::watch::Sender<TaskControlMessage>,
+	config: Arc<config::Config>,
 }
 
 #[derive(Clone, Copy)]
@@ -43,22 +68,23 @@ pub enum Error {
 }
 
 impl Player {
-	pub fn new(playlist: Vec<PathBuf>) -> Result<Self, Error> {
+	pub fn new(playlist: Vec<PathBuf>, config: Arc<config::Config>) -> Result<Self, Error> {
 		if playlist.is_empty() {
 			return Err(Error::EmptyPlayilist);
 		}
 
 		let index =
-			if CONFIG.shuffle { rand::thread_rng().gen_range(0..playlist.len()) } else { 0 };
+			if config.shuffle { rand::thread_rng().gen_range(0..playlist.len()) } else { 0 };
 		let tx = tokio::sync::broadcast::channel(4).0;
 
 		let player = Self {
 			inner: Arc::new(Inner {
 				playlist: playlist.into_boxed_slice(),
 				index: index.into(),
-				mediainfo: Default::default(),
+				mediainfo: FixedDeque::new(config.mediainfo_history.get()).into(),
 				tx,
 				task_control_tx: tokio::sync::watch::channel(TaskControlMessage::Play).0,
+				config,
 			}),
 		};
 
@@ -93,7 +119,7 @@ impl Player {
 	}
 
 	async fn play_next(&self) {
-		let Inner { playlist, index, tx, .. } = &*self.inner;
+		let Inner { playlist, index, tx, config, .. } = &*self.inner;
 		let index = index.load(Ordering::Relaxed);
 
 		let input = &playlist[index];
@@ -104,10 +130,10 @@ impl Player {
 			return;
 		};
 
-		let copy_codec = mediainfo.codec == "mp3" && !CONFIG.transcode;
+		let copy_codec = mediainfo.codec == "mp3" && !config.transcode;
 
 		let mut reader: Box<dyn AudioReader> =
-			Box::new(audio::FFMpegAudioReader::new(input, CONFIG.bitrate, copy_codec));
+			Box::new(audio::FFMpegAudioReader::new(input, config.bitrate, copy_codec));
 
 		println!(
 			"{:?}\t(codec: {}, copy: {})",
@@ -116,10 +142,7 @@ impl Player {
 			if copy_codec { "yes" } else { "no" }
 		);
 
-		{
-			let x = &mut *self.inner.mediainfo.write().await;
-			let _ = std::mem::replace(x, mediainfo);
-		}
+		self.inner.mediainfo.write().await.push(mediainfo);
 
 		let buf = &mut [0u8; 4096];
 		loop {
@@ -158,13 +181,13 @@ impl Player {
 		self.inner.tx.subscribe()
 	}
 
-	pub async fn mediainfo(&self) -> RwLockReadGuard<cmd::Mediainfo> {
-		self.inner.mediainfo.read().await
+	pub async fn read_mediainfo<R, F: Send + FnOnce(&[cmd::Mediainfo]) -> R>(&self, f: F) -> R {
+		f(self.inner.mediainfo.read().await.as_slice())
 	}
 
 	fn next(&self) {
-		let Inner { index, playlist, .. } = &*self.inner;
-		let shuffle = CONFIG.shuffle;
+		let Inner { index, playlist, config, .. } = &*self.inner;
+		let shuffle = config.shuffle;
 
 		let mut loaded_index = index.load(Ordering::Relaxed);
 		if shuffle {

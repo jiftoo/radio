@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
-use std::{num::NonZeroU32, path::PathBuf, str::FromStr};
+use std::{
+	num::{NonZeroU32, NonZeroUsize},
+	path::PathBuf,
+	str::FromStr,
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
@@ -11,6 +15,7 @@ pub struct Config {
 	pub bitrate: u32,
 	pub transcode: bool,
 	pub enable_mediainfo: bool,
+	pub mediainfo_history: NonZeroUsize,
 }
 
 #[derive(Debug, Serialize, Deserialize, clap::Parser)]
@@ -44,9 +49,19 @@ pub struct CliConfig {
 		long,
 		action,
 		help = "Enable /mediainfo endpoint. It serves metadata for the current song in JSON format.",
-		default_value_t = true
+		default_value_t = true,
+		group = "mediainfo"
 	)]
 	pub enable_mediainfo: bool,
+	#[clap(
+		long,
+		action,
+		value_name = "SIZE",
+		help = "The size of song history to keep track of. Must be greater than 0.",
+		default_value = "16",
+		requires = "mediainfo"
+	)]
+	pub mediainfo_history: NonZeroUsize,
 	#[clap(
 		long,
 		action,
@@ -131,6 +146,7 @@ impl From<CliConfig> for Config {
 			bitrate: cli.transcode_bitrate.bits_per_second.get(),
 			transcode: cli.transcode,
 			enable_mediainfo: cli.enable_mediainfo,
+			mediainfo_history: cli.mediainfo_history,
 		}
 	}
 }
@@ -149,6 +165,7 @@ impl Default for Config {
 			bitrate: 128_000,
 			transcode: false,
 			enable_mediainfo: true,
+			mediainfo_history: NonZeroUsize::new(16).unwrap(),
 		}
 	}
 }
