@@ -115,7 +115,7 @@ pub async fn mediainfo(input: &Path) -> Result<Mediainfo, String> {
 	let output: P = match serde_json::from_str(&String::from_utf8_lossy(&output.stdout)) {
 		Ok(x) => x,
 		Err(e) => {
-			return Err(format!("ffprobe failed: {}\n", e));
+			return Err(format!("ffprobe failed for {}: {}", input.display(), e));
 		}
 	};
 	let [stream] = output.streams;
