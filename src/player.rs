@@ -47,33 +47,6 @@ impl<T> FixedDeque<T> {
 	}
 }
 
-#[derive(Debug, Default)]
-pub struct Statistics {
-	pub time_played: Duration,
-	pub listeners: usize,
-	pub max_listeners: usize,
-	pub bytes_transcoded: usize,
-	pub bytes_copied: usize,
-	pub bytes_sent: usize,
-	pub target_badwidth: usize,
-}
-
-pub struct Inner {
-	playlist: Box<[PathBuf]>,
-	index: AtomicUsize,
-	mediainfo: RwLock<FixedDeque<cmd::Mediainfo>>,
-	tx: tokio::sync::broadcast::Sender<Bytes>,
-	task_control_tx: tokio::sync::watch::Sender<TaskControlMessage>,
-	config: Arc<config::Config>,
-	statistics: Arc<RwLock<Statistics>>,
-}
-
-#[derive(Clone, Copy)]
-enum TaskControlMessage {
-	Play,
-	Pause,
-}
-
 pub struct TrackDropStream<T: futures_core::Stream>(T, Option<oneshot::Sender<()>>);
 
 impl<T: Stream + Unpin> TrackDropStream<T> {
@@ -99,6 +72,33 @@ impl<T: Stream + Unpin> futures_core::Stream for TrackDropStream<T> {
 	) -> std::task::Poll<Option<Self::Item>> {
 		Pin::new(&mut self.0).poll_next(cx)
 	}
+}
+
+#[derive(Debug, Default)]
+pub struct Statistics {
+	pub time_played: Duration,
+	pub listeners: usize,
+	pub max_listeners: usize,
+	pub bytes_transcoded: usize,
+	pub bytes_copied: usize,
+	pub bytes_sent: usize,
+	pub target_badwidth: usize,
+}
+
+pub struct Inner {
+	playlist: Box<[PathBuf]>,
+	index: AtomicUsize,
+	mediainfo: RwLock<FixedDeque<cmd::Mediainfo>>,
+	tx: tokio::sync::broadcast::Sender<Bytes>,
+	task_control_tx: tokio::sync::watch::Sender<TaskControlMessage>,
+	config: Arc<config::Config>,
+	statistics: Arc<RwLock<Statistics>>,
+}
+
+#[derive(Clone, Copy)]
+enum TaskControlMessage {
+	Play,
+	Pause,
 }
 
 pub type PlayerRx = TrackDropStream<tokio_stream::wrappers::BroadcastStream<Bytes>>;
