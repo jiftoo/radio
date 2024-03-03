@@ -190,13 +190,16 @@ impl Player {
 		self.inner.mediainfo.write().await.push(mediainfo);
 
 		let buf = &mut [0u8; 4096];
-		let mut tick_instant = tokio::time::Instant::now();
+		let mut bandwidth_instant = tokio::time::Instant::now();
+		let mut bandwidth_acc = 0;
 		loop {
 			let data = reader.read_data(buf).await.unwrap();
 			match data {
 				audio::Data::Audio(0) => break,
 				audio::Data::Audio(read) => {
 					let _ = tx.send(Bytes::copy_from_slice(&buf[..read]));
+					bandwidth_acc += read;
+
 					let mut stats = self.inner.statistics.write().await;
 					if copy_codec {
 						stats.bytes_copied += read;
@@ -205,8 +208,11 @@ impl Player {
 					}
 					stats.bytes_sent += read * tx.receiver_count();
 
-					stats.target_badwidth = ((read * tx.receiver_count()) as f32
-						/ tick_instant.elapsed().as_secs_f32()) as usize;
+					if bandwidth_instant.elapsed() >= Duration::from_secs(1) {
+						stats.target_badwidth = bandwidth_acc * tx.receiver_count();
+						bandwidth_acc = 0;
+						bandwidth_instant = tokio::time::Instant::now();
+					}
 				}
 				audio::Data::Error(err) => {
 					println!("ffmpeg error: {}", err);
@@ -214,7 +220,6 @@ impl Player {
 				}
 			}
 			self.inner.statistics.write().await.time_played = start_instant.elapsed();
-			tick_instant = tokio::time::Instant::now();
 		}
 		self.next();
 	}
