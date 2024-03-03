@@ -2,7 +2,7 @@ use clap::ArgAction;
 use serde::{Deserialize, Serialize};
 use std::{
 	fmt::{Display, Formatter},
-	num::{NonZeroU32, NonZeroUsize},
+	num::{NonZeroU32, NonZeroUsize, ParseFloatError},
 	path::{Path, PathBuf},
 	str::FromStr,
 };
@@ -16,6 +16,7 @@ pub struct Config {
 	pub shuffle: bool,
 	pub bitrate: u32,
 	pub transcode_all: bool,
+	pub sweeper_chance: f32,
 	pub enable_mediainfo: bool,
 	pub mediainfo_history: NonZeroUsize,
 }
@@ -43,6 +44,24 @@ impl Display for UseConfigArg {
 			Self::Default => write!(f, "Default"),
 			Self::Custom(x) => write!(f, "Custom({})", x.display()),
 		}
+	}
+}
+
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct ZeroOneF32(f32);
+
+impl FromStr for ZeroOneF32 {
+	type Err = <f32 as FromStr>::Err;
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		let x: f32 = s.parse()?;
+		(0.0..=1.0).contains(&x).then_some(Self(x)).ok_or_else(|| "a".parse::<f32>().unwrap_err())
+	}
+}
+
+impl Display for ZeroOneF32 {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		self.0.fmt(f)
 	}
 }
 
@@ -102,6 +121,14 @@ Optionally pass a path to the config file to be created/read (not directory).",
 	#[clap(long, action, help = "Choose next song randomly.", default_value_t = true)]
 	pub shuffle: bool,
 	#[clap(
+		value_name = "0..1",
+		long,
+		action,
+		help = "Chance to prepend a (short) audio file from ./sweepers to a song. Set to 0 to disable",
+		default_value_t = ZeroOneF32(0.0)
+	)]
+	pub sweeper_chance: ZeroOneF32,
+	#[clap(
 		long = "bitrate",
 		help = "The bitrate to use for transcoding. Plain value for bps and suffixed with 'k' for kbps.",
 		default_value = "128k"
@@ -135,8 +162,11 @@ Optionally pass a path to the config file to be created/read (not directory).",
 		default_missing_value = "true"
 	)]
 	pub transcode_all: bool,
-	#[clap(long, help = "The root directory to recursively search for music.
-Note: --use-config allows to specify multiple root directories.")]
+	#[clap(
+		long,
+		help = "The root directory to recursively search for music.
+Note: --use-config allows to specify multiple root directories."
+	)]
 	pub root: PathBuf,
 	#[command(flatten, help = "Optionally include or exclude directories or files.")]
 	pub mode: Option<DirectoryConfigModeCli>,
@@ -210,6 +240,7 @@ impl From<CliConfig> for Config {
 			dirs: dir.into_boxed_slice(),
 			enable_webui: cli.enable_webui,
 			shuffle: cli.shuffle,
+			sweeper_chance: cli.sweeper_chance.0,
 			bitrate: cli.transcode_bitrate.bits_per_second.get(),
 			transcode_all: cli.transcode_all,
 			enable_mediainfo: cli.enable_mediainfo,
@@ -228,6 +259,7 @@ impl Default for Config {
 				mode: DirectoryConfigMode::Exclude([].into()),
 			}]),
 			shuffle: true,
+			sweeper_chance: 0.0,
 			enable_webui: true,
 			bitrate: 128_000,
 			transcode_all: false,

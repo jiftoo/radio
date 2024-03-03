@@ -19,20 +19,25 @@ pub trait AudioReader: Send {
 pub struct FFMpegAudioReader {
 	file: PathBuf,
 	metadata: Option<cmd::Mediainfo>,
-	error_buf: String,
+	error_buf: Vec<u8>,
 	handle: tokio::process::Child,
 	stdout: tokio::process::ChildStdout,
 	stderr: tokio::process::ChildStderr,
 }
 
 impl FFMpegAudioReader {
-	pub fn new(input: &Path, bitrate: u32, copy_codec: bool) -> Self {
-		let mut handle = cmd::spawn_ffmpeg(input, bitrate, copy_codec);
+	pub fn start(
+		input: impl AsRef<Path>,
+		bitrate: u32,
+		copy_codec: bool,
+		insert_sweeper: bool,
+	) -> Self {
+		let mut handle = cmd::spawn_ffmpeg(input.as_ref(), bitrate, copy_codec, insert_sweeper);
 		let stdout = handle.stdout.take().unwrap();
 		let stderr = handle.stderr.take().unwrap();
 		Self {
-			file: input.to_path_buf(),
-			error_buf: String::new(),
+			file: input.as_ref().to_path_buf(),
+			error_buf: Default::default(),
 			handle,
 			stdout,
 			stderr,
@@ -52,9 +57,15 @@ impl AudioReader for FFMpegAudioReader {
 					Err(e) => Err(e),
 				}
 			},
-			_ = self.stderr.read_to_string(&mut self.error_buf) => {
-				Ok(Data::Error(self.error_buf.clone()))
-			}
+			Ok(x) = self.stderr.read_buf(&mut self.error_buf) => {
+				if x > 0 {
+					let mut message = String::from_utf8(self.error_buf.clone()).unwrap();
+					self.stderr.read_to_string(&mut message).await.unwrap();
+					Ok(Data::Error(message))
+				} else {
+					Ok(Data::Audio(0))
+				}
+			},
 		}
 	}
 

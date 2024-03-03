@@ -1,6 +1,6 @@
 #![warn(clippy::nursery)]
 #![deny(clippy::semicolon_if_nothing_returned)]
-#![allow(unused)]
+// #![allow(unused)]
 
 mod audio;
 mod cmd;
@@ -15,7 +15,7 @@ use axum::{
 use clap::{CommandFactory, Parser};
 use futures_core::Stream;
 use player::Player;
-use std::{ffi::OsString, fmt::Write, pin::Pin, sync::Arc};
+use std::{ffi::OsString, fmt::Write, pin::Pin, sync::Arc, time::Duration};
 use tokio::sync::oneshot;
 use tokio_stream::StreamExt;
 
@@ -170,16 +170,17 @@ async fn webui(State(player): State<Player>) -> impl IntoResponse {
 		}
 	}
 
-	let mut body = {
+	let body = {
 		let mut body = String::new();
 		let stats = player.statistics().read().await;
-		writeln!(&mut body, "Time played: {:?}", stats.time_played);
-		writeln!(&mut body, "Listeners: {}", stats.listeners);
-		writeln!(&mut body, "Max listeners: {}", stats.max_listeners);
-		writeln!(&mut body, "Sent: {}", display_bytes(stats.bytes_sent));
-		writeln!(&mut body, "Transcoded: {}", display_bytes(stats.bytes_transcoded));
-		writeln!(&mut body, "Copied: {}", display_bytes(stats.bytes_copied));
-		writeln!(&mut body, "Target bandwidth: {}/s", display_bytes(stats.target_badwidth));
+		writeln!(&mut body, "Time played: {:?}", stats.time_played).unwrap();
+		writeln!(&mut body, "Listeners: {}", stats.listeners).unwrap();
+		writeln!(&mut body, "Max listeners: {}", stats.max_listeners).unwrap();
+		writeln!(&mut body, "Sent: {}", display_bytes(stats.bytes_sent)).unwrap();
+		writeln!(&mut body, "Transcoded: {}", display_bytes(stats.bytes_transcoded)).unwrap();
+		writeln!(&mut body, "Copied: {}", display_bytes(stats.bytes_copied)).unwrap();
+		writeln!(&mut body, "Target bandwidth: {}/s", display_bytes(stats.target_badwidth))
+			.unwrap();
 		body
 	};
 	([(header::CONTENT_TYPE, "text/plain")], body)

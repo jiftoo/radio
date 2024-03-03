@@ -12,10 +12,14 @@ use std::{
 use axum::body::Bytes;
 use futures_core::Stream;
 use rand::Rng;
-use tokio::sync::{oneshot, RwLock};
+use tokio::{
+	fs::File,
+	io::AsyncWriteExt,
+	sync::{oneshot, RwLock},
+};
 
 use crate::{
-	audio::{self, AudioReader},
+	audio::{self, AudioReader, FFMpegAudioReader},
 	cmd, config,
 };
 
@@ -162,65 +166,77 @@ impl Player {
 
 	#[allow(clippy::significant_drop_tightening)]
 	async fn play_next(&self) {
-		let mut start_instant = tokio::time::Instant::now();
+		let start_instant = tokio::time::Instant::now();
 
 		let Inner { playlist, index, tx, config, .. } = &*self.inner;
 		let index = index.load(Ordering::Relaxed);
 
 		let input = &playlist[index];
 
-		let Ok(mediainfo) = cmd::mediainfo(input).await else {
-			println!("{:?}\tbroken file - skipping.", playlist[index].file_name().unwrap());
-			self.next();
-			return;
+		let mediainfo = match cmd::mediainfo(input).await {
+			Ok(x) => x,
+			Err(x) => {
+				println!("{:?}\tbroken file - skipping: {x}", playlist[index].file_name().unwrap());
+				self.next();
+				return;
+			}
 		};
 
+		let run_sweeper = rand::thread_rng().gen::<f32>() <= config.sweeper_chance;
 		let copy_codec = !config.transcode_all && mediainfo.codec == "mp3";
 
-		let mut reader: Box<dyn AudioReader> =
-			Box::new(audio::FFMpegAudioReader::new(input, config.bitrate, copy_codec));
-
 		println!(
-			"{:?}\t(codec: {}, copy: {})",
+			"{:?}\t(codec: {}, copy: {}, sweeper: {})",
 			playlist[index].file_name().unwrap(),
 			mediainfo.codec,
-			if copy_codec { "yes" } else { "no" }
+			if copy_codec { "yes" } else { "no" },
+			if run_sweeper { "yes" } else { "no" }
 		);
 
 		self.inner.mediainfo.write().await.push(mediainfo);
 
-		let buf = &mut [0u8; 4096];
-		let mut bandwidth_instant = tokio::time::Instant::now();
-		let mut bandwidth_acc = 0;
-		loop {
-			let data = reader.read_data(buf).await.unwrap();
-			match data {
-				audio::Data::Audio(0) => break,
-				audio::Data::Audio(read) => {
-					let _ = tx.send(Bytes::copy_from_slice(&buf[..read]));
-					bandwidth_acc += read;
+		let transmit_reader = |mut reader: FFMpegAudioReader| async move {
+			let buf = &mut [0u8; 4096];
+			let mut bandwidth_instant = tokio::time::Instant::now();
+			let mut bandwidth_acc = 0;
+			loop {
+				let data = reader.read_data(buf).await.unwrap();
+				match data {
+					audio::Data::Audio(0) => break,
+					audio::Data::Audio(read) => {
+						let _ = tx.send(Bytes::copy_from_slice(&buf[..read]));
+						bandwidth_acc += read;
 
-					let mut stats = self.inner.statistics.write().await;
-					if copy_codec {
-						stats.bytes_copied += read;
-					} else {
-						stats.bytes_transcoded += read;
+						let mut stats = self.inner.statistics.write().await;
+						if copy_codec {
+							stats.bytes_copied += read;
+						} else {
+							stats.bytes_transcoded += read;
+						}
+						stats.bytes_sent += read * tx.receiver_count();
+
+						if bandwidth_instant.elapsed() >= Duration::from_secs(1) {
+							stats.target_badwidth = bandwidth_acc * tx.receiver_count();
+							bandwidth_acc = 0;
+							bandwidth_instant = tokio::time::Instant::now();
+						}
 					}
-					stats.bytes_sent += read * tx.receiver_count();
-
-					if bandwidth_instant.elapsed() >= Duration::from_secs(1) {
-						stats.target_badwidth = bandwidth_acc * tx.receiver_count();
-						bandwidth_acc = 0;
-						bandwidth_instant = tokio::time::Instant::now();
+					audio::Data::Error(err) => {
+						println!("ffmpeg error: {:?}", err);
+						break;
 					}
 				}
-				audio::Data::Error(err) => {
-					println!("ffmpeg error: {}", err);
-					break;
-				}
+				self.inner.statistics.write().await.time_played = start_instant.elapsed();
 			}
-			self.inner.statistics.write().await.time_played = start_instant.elapsed();
-		}
+		};
+
+		transmit_reader(audio::FFMpegAudioReader::start(
+			input,
+			config.bitrate,
+			copy_codec,
+			run_sweeper,
+		))
+		.await;
 		self.next();
 	}
 
@@ -241,6 +257,7 @@ impl Player {
 	}
 
 	pub fn subscribe(&self) -> PlayerRx {
+		let mut tx = self.inner.tx.subscribe();
 		let stream = tokio_stream::wrappers::BroadcastStream::new(self.inner.tx.subscribe());
 		let (stream, drop_rx) = TrackDropStream::create(stream);
 
