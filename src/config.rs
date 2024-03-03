@@ -95,9 +95,8 @@ Optionally pass a path to the config file to be created/read (not directory).",
 	#[clap(
 		long,
 		action,
-		// help = "Enable /dashboard endpoint. Lets you view some statistics.",
-		help = "not implemented.",
-		default_value_t = false
+		help = "Enable /webui endpoint. Lets you view some statistics.",
+		default_value_t = true
 	)]
 	pub enable_webui: bool,
 	#[clap(long, action, help = "Choose next song randomly.", default_value_t = true)]

@@ -1,6 +1,7 @@
 use std::{
 	collections::VecDeque,
 	path::{Path, PathBuf},
+	pin::Pin,
 	sync::{
 		atomic::{AtomicUsize, Ordering},
 		Arc,
@@ -9,8 +10,9 @@ use std::{
 };
 
 use axum::body::Bytes;
+use futures_core::Stream;
 use rand::Rng;
-use tokio::sync::RwLock;
+use tokio::sync::{oneshot, RwLock};
 
 use crate::{
 	audio::{self, AudioReader},
@@ -45,6 +47,17 @@ impl<T> FixedDeque<T> {
 	}
 }
 
+#[derive(Debug, Default)]
+pub struct Statistics {
+	pub time_played: Duration,
+	pub listeners: usize,
+	pub max_listeners: usize,
+	pub bytes_transcoded: usize,
+	pub bytes_copied: usize,
+	pub bytes_sent: usize,
+	pub target_badwidth: usize,
+}
+
 pub struct Inner {
 	playlist: Box<[PathBuf]>,
 	index: AtomicUsize,
@@ -52,6 +65,7 @@ pub struct Inner {
 	tx: tokio::sync::broadcast::Sender<Bytes>,
 	task_control_tx: tokio::sync::watch::Sender<TaskControlMessage>,
 	config: Arc<config::Config>,
+	statistics: Arc<RwLock<Statistics>>,
 }
 
 #[derive(Clone, Copy)]
@@ -60,7 +74,34 @@ enum TaskControlMessage {
 	Pause,
 }
 
-pub type PlayerRx = tokio::sync::broadcast::Receiver<Bytes>;
+pub struct TrackDropStream<T: futures_core::Stream>(T, Option<oneshot::Sender<()>>);
+
+impl<T: Stream + Unpin> TrackDropStream<T> {
+	fn create(stream: T) -> (Self, oneshot::Receiver<()>) {
+		let (tx, drop_rx) = oneshot::channel();
+		let this = Self(stream, Some(tx));
+		(this, drop_rx)
+	}
+}
+
+impl<T: Stream> Drop for TrackDropStream<T> {
+	fn drop(&mut self) {
+		let _ = self.1.take().unwrap().send(());
+	}
+}
+
+impl<T: Stream + Unpin> futures_core::Stream for TrackDropStream<T> {
+	type Item = T::Item;
+
+	fn poll_next(
+		mut self: std::pin::Pin<&mut Self>,
+		cx: &mut std::task::Context<'_>,
+	) -> std::task::Poll<Option<Self::Item>> {
+		Pin::new(&mut self.0).poll_next(cx)
+	}
+}
+
+pub type PlayerRx = TrackDropStream<tokio_stream::wrappers::BroadcastStream<Bytes>>;
 
 #[derive(Debug)]
 pub enum Error {
@@ -85,6 +126,7 @@ impl Player {
 				tx,
 				task_control_tx: tokio::sync::watch::channel(TaskControlMessage::Play).0,
 				config,
+				statistics: Default::default(),
 			}),
 		};
 
@@ -118,7 +160,10 @@ impl Player {
 		});
 	}
 
+	#[allow(clippy::significant_drop_tightening)]
 	async fn play_next(&self) {
+		let mut start_instant = tokio::time::Instant::now();
+
 		let Inner { playlist, index, tx, config, .. } = &*self.inner;
 		let index = index.load(Ordering::Relaxed);
 
@@ -145,18 +190,31 @@ impl Player {
 		self.inner.mediainfo.write().await.push(mediainfo);
 
 		let buf = &mut [0u8; 4096];
+		let mut tick_instant = tokio::time::Instant::now();
 		loop {
 			let data = reader.read_data(buf).await.unwrap();
 			match data {
 				audio::Data::Audio(0) => break,
 				audio::Data::Audio(read) => {
 					let _ = tx.send(Bytes::copy_from_slice(&buf[..read]));
+					let mut stats = self.inner.statistics.write().await;
+					if copy_codec {
+						stats.bytes_copied += read;
+					} else {
+						stats.bytes_transcoded += read;
+					}
+					stats.bytes_sent += read * tx.receiver_count();
+
+					stats.target_badwidth = ((read * tx.receiver_count()) as f32
+						/ tick_instant.elapsed().as_secs_f32()) as usize;
 				}
 				audio::Data::Error(err) => {
 					println!("ffmpeg error: {}", err);
 					break;
 				}
 			}
+			self.inner.statistics.write().await.time_played = start_instant.elapsed();
+			tick_instant = tokio::time::Instant::now();
 		}
 		self.next();
 	}
@@ -178,11 +236,34 @@ impl Player {
 	}
 
 	pub fn subscribe(&self) -> PlayerRx {
-		self.inner.tx.subscribe()
+		let stream = tokio_stream::wrappers::BroadcastStream::new(self.inner.tx.subscribe());
+		let (stream, drop_rx) = TrackDropStream::create(stream);
+
+		tokio::spawn({
+			let statistics = self.inner.statistics.clone();
+			async move {
+				{
+					let mut statistics = statistics.write().await;
+					statistics.listeners += 1;
+					statistics.max_listeners = statistics.max_listeners.max(statistics.listeners);
+				}
+				drop_rx.await.unwrap();
+				{
+					let mut statistics = statistics.write().await;
+					statistics.listeners -= 1;
+				}
+			}
+		});
+
+		stream
 	}
 
 	pub fn config(&self) -> &config::Config {
 		&self.inner.config
+	}
+
+	pub fn statistics(&self) -> &RwLock<Statistics> {
+		&self.inner.statistics
 	}
 
 	pub async fn read_mediainfo<R, F: Send + FnOnce(&[cmd::Mediainfo]) -> R>(&self, f: F) -> R {
