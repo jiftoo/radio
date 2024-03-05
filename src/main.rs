@@ -24,7 +24,8 @@ use axum::{
 use clap::Parser;
 
 use player::Player;
-use std::{fmt::Write, sync::Arc};
+use std::{fmt::Write, sync::Arc, time::Duration};
+use tokio::time::Interval;
 
 #[tokio::main]
 async fn main() {
@@ -227,10 +228,15 @@ async fn mediainfo_ws(
 		})
 		.on_upgrade(move |mut socket| async move {
 			let mut rx = player.subscribe_next_song();
+			let mut interaval = tokio::time::interval(Duration::from_secs(19));
 			loop {
 				tokio::select! {
 					biased;
 					None = socket.recv() => break,
+					_ = interaval.tick() => {
+						println!("pinging socket");
+						socket.send(ws::Message::Ping(vec![])).await;
+					}
 					_ = rx.changed() => {
 						println!("sending new song to socket");
 						let _ = socket.send(ws::Message::Text("next".to_string())).await;
