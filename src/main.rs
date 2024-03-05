@@ -12,12 +12,10 @@ use axum::{
 	body::Body, debug_handler, extract::State, http::header, response::IntoResponse, routing::get,
 	Router,
 };
-use clap::{CommandFactory, Parser};
-use futures_core::Stream;
+use clap::Parser;
+
 use player::Player;
-use std::{ffi::OsString, fmt::Write, pin::Pin, sync::Arc, time::Duration};
-use tokio::sync::oneshot;
-use tokio_stream::StreamExt;
+use std::{fmt::Write, sync::Arc};
 
 #[tokio::main]
 async fn main() {
@@ -170,10 +168,20 @@ async fn webui(State(player): State<Player>) -> impl IntoResponse {
 		}
 	}
 
+	fn display_time(x: std::time::Duration) -> String {
+		let mut x = x.as_secs();
+		let seconds = x % 60;
+		x /= 60;
+		let minutes = x % 60;
+		x /= 60;
+		let hours = x;
+		format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+	}
+
 	let body = {
 		let mut body = String::new();
 		let stats = player.statistics().read().await;
-		writeln!(&mut body, "Time played: {:?}", stats.time_played).unwrap();
+		writeln!(&mut body, "Time played: {}", display_time(stats.time_played)).unwrap();
 		writeln!(&mut body, "Listeners: {}", stats.listeners).unwrap();
 		writeln!(&mut body, "Max listeners: {}", stats.max_listeners).unwrap();
 		writeln!(&mut body, "Sent: {}", display_bytes(stats.bytes_sent)).unwrap();

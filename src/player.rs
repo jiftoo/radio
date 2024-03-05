@@ -252,7 +252,7 @@ impl Player {
 	}
 
 	pub fn subscribe(&self) -> PlayerRx {
-		let mut tx = self.inner.tx.subscribe();
+		let _tx = self.inner.tx.subscribe();
 		let stream = tokio_stream::wrappers::BroadcastStream::new(self.inner.tx.subscribe());
 		let (stream, drop_rx) = TrackDropStream::create(stream);
 

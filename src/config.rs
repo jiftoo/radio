@@ -2,7 +2,7 @@ use clap::ArgAction;
 use serde::{Deserialize, Serialize};
 use std::{
 	fmt::{Display, Formatter},
-	num::{NonZeroU32, NonZeroUsize, ParseFloatError},
+	num::{NonZeroU32, NonZeroUsize},
 	path::{Path, PathBuf},
 	str::FromStr,
 };
