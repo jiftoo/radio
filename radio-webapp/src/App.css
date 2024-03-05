@@ -1,0 +1,133 @@
+#container {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	width: 800px;
+	padding: 4px;
+}
+
+#mediainfo {
+	display: flex;
+	flex-flow: row;
+	justify-content: flex-start;
+	align-items: center;
+	gap: 1em;
+	flex-shrink: 1;
+}
+
+#mediainfo > #image {
+	padding: 4px;
+	width: 400px;
+	height: 400px;
+	object-fit: contain;
+}
+
+#mediainfo > #image > img {
+	width: 100%;
+	height: 100%;
+	object-fit: contain;
+}
+
+#mediainfo > #info {
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	padding-left: 1em;
+	padding-right: 1em;
+	width: 350px;
+}
+
+#mediainfo > #info > ul {
+	margin: 0;
+	display: flex;
+	flex-direction: column;
+	justify-content: space-between;
+	padding: 0;
+	list-style: none;
+	gap: 2px;
+}
+
+#player {
+	height: 50px;
+	padding: 4px;
+	width: 100%;
+}
+
+#player > #controls {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+
+#player > #controls > button {
+	appearance: none;
+	font-size: 16px;
+	background-color: #cf8439;
+	border: 1px solid #ab6b2a;
+	border-radius: 8px;
+	padding: 0.5em 1.33em;
+	margin-right: 1em;
+	cursor: pointer;
+}
+
+#player > #controls > button:active {
+	transform: scale(0.95);
+}
+
+#player > #controls > input[type="range"] {
+	-webkit-appearance: none;
+	appearance: none;
+	width: 33%;
+	height: 10px;
+	border-radius: 5px;
+	background: #d3d3d3;
+	outline: none;
+}
+
+#player > #controls > input[type="range"]::-moz-range-thumb {
+	appearance: none;
+	width: 20px;
+	height: 20px;
+	border-radius: 50%;
+	background: #cf8439;
+	cursor: pointer;
+	border: 1px solid #ab6b2a;
+}
+
+#player > #controls > input[type="range"]::-webkit-slider-thumb {
+	appearance: none;
+	width: 20px;
+	height: 20px;
+	border-radius: 50%;
+	background: #cf8439;
+	cursor: pointer;
+	border: 1px solid #ab6b2a;
+}
+
+@media (width <= 768px) {
+	#container {
+		width: 100%;
+		height: 100vh;
+		height: 100dvh;
+		justify-content: space-between;
+	}
+	#mediainfo {
+		flex-grow: 1;
+		flex-direction: column;
+	}
+	#mediainfo > #info {
+		flex-grow: 1;
+		align-self: flex-start;
+	}
+	#mediainfo > #info > ul {
+		margin-bottom: auto;
+	}
+	#mediainfo > #image {
+		width: 100%;
+		height: auto;
+		flex-shrink: 1;
+	}
+	#mediainfo > #image > img {
+		max-height: 60vh;
+	}
+}

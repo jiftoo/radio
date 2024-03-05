@@ -1,7 +1,7 @@
 use std::{io::ErrorKind, process::Command};
 
 fn main() {
-	let generated_warnings = (check_exec("ffmpeg")) || (check_exec("ffprobe"));
+	let generated_warnings = (cannot_run("ffmpeg")) || (cannot_run("ffprobe"));
 
 	if generated_warnings {
 		println!(
@@ -10,9 +10,33 @@ fn main() {
 			env!("CARGO_PKG_VERSION"),
 		);
 	}
+
+	build_web();
 }
 
-fn check_exec(name: &str) -> bool {
+fn build_web() {
+	if cannot_run("pnpm") {
+		println!("cargo:warning=You need to install pnpm to build the crate.");
+		std::process::exit(1);
+	}
+	fn run(cmd: &mut Command) {
+		let output = cmd.output().unwrap();
+		let status = output.status;
+		let output = String::from_utf8(output.stdout).unwrap();
+		let output = output.split('\n').collect::<Vec<_>>();
+		for line in output {
+			println!("cargo:warning={}", line);
+		}
+		if !status.success() {
+			panic!("Command failed: {:?}", cmd)
+		};
+	}
+	run(Command::new("pnpm").arg("i").current_dir("./radio-webapp"));
+	run(Command::new("pnpm").arg("build").env("BASE_URL", "/radio/").current_dir("./radio-webapp"));
+	println!("cargo:warning=Webapp built successfully.");
+}
+
+fn cannot_run(name: &str) -> bool {
 	match Command::new(name).spawn().or(Command::new(format!("./{name}")).spawn()) {
 		Ok(mut x) => {
 			let _ = x.kill();

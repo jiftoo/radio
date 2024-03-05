@@ -1,6 +1,7 @@
 #![warn(clippy::nursery)]
+#![allow(clippy::redundant_pub_crate)]
 #![deny(clippy::semicolon_if_nothing_returned)]
-// #![allow(unused)]
+#![allow(unused)]
 
 mod audio;
 mod cmd;
@@ -9,18 +10,17 @@ mod files;
 mod player;
 
 use axum::{
-	body::{Body, Bytes},
+	body::Body,
 	debug_handler,
-	extract::State,
-	http::{header, HeaderMap, HeaderValue, StatusCode},
-	response::IntoResponse,
+	extract::{ws, Path, State, WebSocketUpgrade},
+	http::{header, HeaderMap, HeaderValue, StatusCode, Uri},
+	response::{Html, IntoResponse},
 	routing::get,
 	Router,
 };
 use clap::Parser;
 
 use player::Player;
-use rand::Rng;
 use std::{fmt::Write, sync::Arc};
 
 #[tokio::main]
@@ -87,7 +87,9 @@ async fn main() {
 		println!(" ... and {} more", player.files().len() - take);
 	}
 
-	let app = define_routes(Router::new(), &config).with_state(player.clone());
+	let app = define_routes(Router::new(), &config)
+		.layer(tower_http::cors::CorsLayer::permissive())
+		.with_state(player.clone());
 
 	let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await.unwrap();
 	println!("Listening on port {}", port);
@@ -141,14 +143,43 @@ fn config_shit() -> Option<Arc<config::Config>> {
 }
 
 fn define_routes(r: Router<Player>, config: &Arc<config::Config>) -> Router<Player> {
-	let mut r = r.route("/", get(stream)).route("/album_art", get(album_art));
+	let mut r = r
+		.route("/stream", get(stream))
+		.route("/", get(webpage))
+		.route("/*file", get(webpage_assets))
+		.route("/album_art", get(album_art));
 	if config.enable_mediainfo {
 		r = r.route("/mediainfo", get(mediainfo));
+		r = r.route("/mediainfo/ws", get(mediainfo_ws));
 	}
 	if config.enable_webui {
 		r = r.route("/webui", get(webui));
 	}
 	r
+}
+
+#[derive(rust_embed::RustEmbed)]
+#[folder = "radio-webapp/dist/"]
+struct WebappAssets;
+
+async fn webpage() -> impl IntoResponse {
+	Html(WebappAssets::get("index.html").unwrap().data)
+}
+
+async fn webpage_assets(Path(path): Path<String>) -> impl IntoResponse {
+	if path.starts_with("assets/") {
+		path.replace("assets/", "");
+	} else {
+		return StatusCode::NOT_FOUND.into_response();
+	}
+
+	match WebappAssets::get(&path) {
+		Some(x) => {
+			let mime = mime_guess::from_path(path).first_or_octet_stream();
+			([(header::CONTENT_TYPE, mime.as_ref())], x.data).into_response()
+		}
+		None => StatusCode::NOT_FOUND.into_response(),
+	}
 }
 
 #[debug_handler]
@@ -174,10 +205,25 @@ async fn mediainfo(State(player): State<Player>) -> impl IntoResponse {
 	([(header::CONTENT_TYPE, "application/json")], mediainfo_json)
 }
 
+async fn mediainfo_ws(State(player): State<Player>, ws: WebSocketUpgrade) -> impl IntoResponse {
+	ws.on_upgrade(move |mut socket| async move {
+		let mut rx = player.subscribe_next_song();
+		loop {
+			tokio::select! {
+				biased;
+				None = socket.recv() => break,
+				_ = rx.changed() => {
+					let _ = socket.send(ws::Message::Text("next".to_string())).await;
+				},
+			}
+		}
+	})
+}
+
 async fn webui(State(player): State<Player>) -> impl IntoResponse {
 	fn display_bytes(x: usize) -> String {
 		match x {
-			x if x < 1024 => format!("{} B", x),
+			x if x < 1024 => format!("{x} B"),
 			x if x < 1024 * 1024 => format!("{:.2} KiB", x as f64 / 1024.0),
 			x if x < 1024 * 1024 * 1024 => format!("{:.2} MiB", x as f64 / 1024.0 / 1024.0),
 			x => format!("{:.2} GiB", x as f64 / 1024.0 / 1024.0 / 1024.0),
@@ -191,7 +237,7 @@ async fn webui(State(player): State<Player>) -> impl IntoResponse {
 		let minutes = x % 60;
 		x /= 60;
 		let hours = x;
-		format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+		format!("{hours:02}:{minutes:02}:{seconds:02}")
 	}
 
 	let body = {

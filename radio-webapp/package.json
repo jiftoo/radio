@@ -1,0 +1,20 @@
+{
+	"name": "radio-webapp",
+	"private": true,
+	"version": "0.0.0",
+	"type": "module",
+	"scripts": {
+		"start": "vite",
+		"build": "tsc && vite build",
+		"preview": "vite preview"
+	},
+	"dependencies": {
+		"solid-js": "^1.8.15"
+	},
+	"devDependencies": {
+		"@types/node": "^20.11.24",
+		"typescript": "^5.2.2",
+		"vite": "^5.1.4",
+		"vite-plugin-solid": "^2.10.1"
+	}
+}

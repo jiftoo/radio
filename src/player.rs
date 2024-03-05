@@ -95,6 +95,7 @@ pub struct Inner {
 	index: AtomicUsize,
 	mediainfo: RwLock<FixedDeque<cmd::Mediainfo>>,
 	tx: tokio::sync::broadcast::Sender<Bytes>,
+	next_song_tx: tokio::sync::watch::Sender<()>,
 	task_control_tx: tokio::sync::watch::Sender<TaskControlMessage>,
 	config: Arc<config::Config>,
 	statistics: RwLock<Statistics>,
@@ -149,6 +150,7 @@ impl Player {
 		let index =
 			if config.shuffle { rand::thread_rng().gen_range(0..playlist.len()) } else { 0 };
 		let tx = tokio::sync::broadcast::channel(4).0;
+		let next_song_tx = tokio::sync::watch::channel(()).0;
 
 		let player = Self {
 			inner: Arc::new(Inner {
@@ -158,6 +160,7 @@ impl Player {
 				index: index.into(),
 				mediainfo: FixedDeque::new(config.mediainfo_history.get()).into(),
 				tx,
+				next_song_tx,
 				task_control_tx: tokio::sync::watch::channel(TaskControlMessage::Play).0,
 				config,
 				statistics: Default::default(),
@@ -211,16 +214,16 @@ impl Player {
 			}
 		};
 
-		match try_album_arts(input).await {
+		let album_image_path = match try_album_arts(input).await {
 			Some(data) => {
-				let mut lock = album_art.write().await;
-				lock.set(data);
+				album_art.write().await.set(data.1);
+				Some(data.0)
 			}
 			None => {
-				let mut lock = album_art.write().await;
-				lock.clear();
+				album_art.write().await.clear();
+				None
 			}
-		}
+		};
 
 		let sweeper_path = {
 			let mut rng = rand::thread_rng();
@@ -232,14 +235,21 @@ impl Player {
 		let copy_codec = !config.transcode_all && mediainfo.codec == "mp3";
 
 		println!(
-			"{:?}\t(codec: {}, copy: {}, sweeper: {})",
+			"{:?}\t(codec: {}, copy: {}, sweeper: {}, album image: {})",
 			playlist[index].file_name().unwrap(),
 			mediainfo.codec,
 			if copy_codec { "yes" } else { "no" },
-			sweeper_path.as_ref().map(|x| x.file_name().unwrap().to_str().unwrap()).unwrap_or("no")
+			sweeper_path.as_ref().map(|x| x.file_name().unwrap().to_str().unwrap()).unwrap_or("no"),
+			album_image_path
+				.as_ref()
+				.map(|x| x.file_name().unwrap().to_str().unwrap())
+				.unwrap_or("none"),
 		);
 
 		self.inner.mediainfo.write().await.push(mediainfo);
+
+		// notify about next song after everything is updated
+		let _ = self.inner.next_song_tx.send(());
 
 		#[allow(clippy::significant_drop_tightening)]
 		let transmit_reader = |mut reader: FFMpegAudioReader| async move {
@@ -329,6 +339,10 @@ impl Player {
 		stream
 	}
 
+	pub fn subscribe_next_song(&self) -> tokio::sync::watch::Receiver<()> {
+		self.inner.next_song_tx.subscribe()
+	}
+
 	pub fn config(&self) -> &config::Config {
 		&self.inner.config
 	}
@@ -367,18 +381,17 @@ impl Player {
 }
 
 /// try to read embedded album art and if it fails, try to read some image from the same directory
-async fn try_album_arts(input: impl AsRef<Path> + Send) -> Option<Vec<u8>> {
-	async fn try_album_art(input: impl AsRef<Path> + Send) -> Option<Vec<u8>> {
-		println!("reading album art from {}", input.as_ref().display());
+async fn try_album_arts(input: impl AsRef<Path> + Send) -> Option<(PathBuf, Vec<u8>)> {
+	async fn try_album_art(input: impl AsRef<Path> + Send) -> Option<(PathBuf, Vec<u8>)> {
 		match cmd::album_art_png(input.as_ref()).await {
 			Ok(None) => None,
-			Ok(Some(buf)) => Some(buf),
+			Ok(Some(buf)) => Some((input.as_ref().to_owned(), buf)),
 			Err(_) => None,
 		}
 	}
 
 	// try from the file itself
-	if let Some(x) = try_album_art(input.as_ref().to_owned()).await {
+	if let Some(x) = try_album_art(input.as_ref()).await {
 		return Some(x);
 	}
 

@@ -1,0 +1,20 @@
+:root {
+	font-family: Minecraft, Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+
+	color-scheme: light dark;
+	background-color: #272726;
+}
+
+body {
+	margin: 0;
+}
+
+#root {
+	display: flex;
+	flex-direction: row;
+	justify-content: center;
+}
+
+* {
+	box-sizing: border-box;
+}
