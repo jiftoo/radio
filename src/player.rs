@@ -12,7 +12,10 @@ use std::{
 use axum::body::Bytes;
 use futures_core::Stream;
 use rand::{seq::IteratorRandom, Rng};
-use tokio::sync::{oneshot, RwLock};
+use tokio::{
+	sync::{oneshot, RwLock},
+	task::JoinSet,
+};
 
 use crate::{
 	audio::{self, AudioReader, FFMpegAudioReader},
@@ -88,12 +91,36 @@ pub struct Statistics {
 pub struct Inner {
 	playlist: Box<[PathBuf]>,
 	sweeper_list: Box<[PathBuf]>,
+	album_art: RwLock<AlbumImage>,
 	index: AtomicUsize,
 	mediainfo: RwLock<FixedDeque<cmd::Mediainfo>>,
 	tx: tokio::sync::broadcast::Sender<Bytes>,
 	task_control_tx: tokio::sync::watch::Sender<TaskControlMessage>,
 	config: Arc<config::Config>,
 	statistics: RwLock<Statistics>,
+}
+
+#[derive(Debug, Default)]
+pub struct AlbumImage(Vec<u8>);
+
+impl AlbumImage {
+	// public method for getting the album art if it exists
+	pub fn get(&self) -> Option<&[u8]> {
+		(!self.0.is_empty()).then_some(&self.0)
+	}
+
+	pub fn checksum(&self) -> Option<i64> {
+		self.get().map(|x| x.iter().map(|x| (*x).into()).fold(0i64, |a, b| a.wrapping_add(b)))
+	}
+
+	// get the inner buffer for modification by player
+	fn set(&mut self, new: Vec<u8>) {
+		self.0 = new;
+	}
+
+	fn clear(&mut self) {
+		self.0.clear();
+	}
 }
 
 #[derive(Clone, Copy)]
@@ -127,6 +154,7 @@ impl Player {
 			inner: Arc::new(Inner {
 				playlist: playlist.into_boxed_slice(),
 				sweeper_list: sweeper_list.into_boxed_slice(),
+				album_art: Default::default(),
 				index: index.into(),
 				mediainfo: FixedDeque::new(config.mediainfo_history.get()).into(),
 				tx,
@@ -167,9 +195,9 @@ impl Player {
 		});
 	}
 
-	#[allow(clippy::significant_drop_tightening)]
+	// #[allow(clippy::significant_drop_tightening, clippy::significant_drop_in_scrutinee)]
 	async fn play_next(&self, player_init_instant: tokio::time::Instant) {
-		let Inner { playlist, sweeper_list, index, tx, config, .. } = &*self.inner;
+		let Inner { playlist, sweeper_list, album_art, index, tx, config, .. } = &*self.inner;
 		let index = index.load(Ordering::Relaxed);
 
 		let input = &playlist[index];
@@ -182,6 +210,17 @@ impl Player {
 				return;
 			}
 		};
+
+		match try_album_arts(input).await {
+			Some(data) => {
+				let mut lock = album_art.write().await;
+				lock.set(data);
+			}
+			None => {
+				let mut lock = album_art.write().await;
+				lock.clear();
+			}
+		}
 
 		let sweeper_path = {
 			let mut rng = rand::thread_rng();
@@ -202,6 +241,7 @@ impl Player {
 
 		self.inner.mediainfo.write().await.push(mediainfo);
 
+		#[allow(clippy::significant_drop_tightening)]
 		let transmit_reader = |mut reader: FFMpegAudioReader| async move {
 			let buf = &mut [0u8; 4096];
 			let mut bandwidth_instant = tokio::time::Instant::now();
@@ -214,6 +254,7 @@ impl Player {
 						let _ = tx.send(Bytes::copy_from_slice(&buf[..read]));
 						bandwidth_acc += read;
 
+						// clippy::significant_drop_tightening
 						let mut stats = self.inner.statistics.write().await;
 						if copy_codec {
 							stats.bytes_copied += read;
@@ -296,6 +337,10 @@ impl Player {
 		&self.inner.statistics
 	}
 
+	pub fn album_art(&self) -> &RwLock<AlbumImage> {
+		&self.inner.album_art
+	}
+
 	pub async fn read_mediainfo<R, F: Send + FnOnce(&[cmd::Mediainfo]) -> R>(&self, f: F) -> R {
 		f(self.inner.mediainfo.read().await.as_slice())
 	}
@@ -319,4 +364,55 @@ impl Player {
 
 		index.store(loaded_index, Ordering::Relaxed);
 	}
+}
+
+/// try to read embedded album art and if it fails, try to read some image from the same directory
+async fn try_album_arts(input: impl AsRef<Path> + Send) -> Option<Vec<u8>> {
+	async fn try_album_art(input: impl AsRef<Path> + Send) -> Option<Vec<u8>> {
+		println!("reading album art from {}", input.as_ref().display());
+		match cmd::album_art_png(input.as_ref()).await {
+			Ok(None) => None,
+			Ok(Some(buf)) => Some(buf),
+			Err(_) => None,
+		}
+	}
+
+	// try from the file itself
+	if let Some(x) = try_album_art(input.as_ref().to_owned()).await {
+		return Some(x);
+	}
+
+	let mut futures_vec = vec![];
+	// then try from the same directory
+	if let Some(x) = input.as_ref().parent() {
+		std::fs::read_dir(x)
+			.unwrap()
+			.flatten()
+			.filter(|x| {
+				let Ok(file_type) = x.file_type() else {
+					return false;
+				};
+				file_type.is_file()
+					&& x.path()
+						.extension()
+						.map_or(false, |x| x == "png" || x == "jpg" || x == "jpeg")
+			})
+			.for_each(|x| futures_vec.push(try_album_art(x.path())));
+	}
+
+	let mut joins = JoinSet::new();
+	for x in futures_vec {
+		joins.spawn(x);
+	}
+
+	let mut result = None;
+	while let Some(fut) = joins.join_next().await {
+		if let Ok(Some(x)) = fut {
+			result = Some(x);
+			joins.abort_all();
+			break;
+		}
+	}
+
+	result
 }

@@ -9,12 +9,18 @@ mod files;
 mod player;
 
 use axum::{
-	body::Body, debug_handler, extract::State, http::header, response::IntoResponse, routing::get,
+	body::{Body, Bytes},
+	debug_handler,
+	extract::State,
+	http::{header, HeaderMap, HeaderValue, StatusCode},
+	response::IntoResponse,
+	routing::get,
 	Router,
 };
 use clap::Parser;
 
 use player::Player;
+use rand::Rng;
 use std::{fmt::Write, sync::Arc};
 
 #[tokio::main]
@@ -135,7 +141,7 @@ fn config_shit() -> Option<Arc<config::Config>> {
 }
 
 fn define_routes(r: Router<Player>, config: &Arc<config::Config>) -> Router<Player> {
-	let mut r = r.route("/", get(stream));
+	let mut r = r.route("/", get(stream)).route("/album_art", get(album_art));
 	if config.enable_mediainfo {
 		r = r.route("/mediainfo", get(mediainfo));
 	}
@@ -202,4 +208,28 @@ async fn webui(State(player): State<Player>) -> impl IntoResponse {
 		body
 	};
 	([(header::CONTENT_TYPE, "text/plain")], body)
+}
+#[allow(clippy::significant_drop_tightening)]
+async fn album_art(State(player): State<Player>, headers: HeaderMap) -> impl IntoResponse {
+	let album_art = &player.album_art().read().await;
+
+	let checksum_header_value =
+		album_art.checksum().map(HeaderValue::from).unwrap_or(HeaderValue::from_static("no-image"));
+
+	if let Some(x) = headers.get(header::IF_NONE_MATCH) {
+		if x == checksum_header_value {
+			return StatusCode::NOT_MODIFIED.into_response();
+		}
+	}
+
+	let album_art = album_art.get();
+
+	let body = album_art.map_or_else(|| Err(StatusCode::NO_CONTENT), |x| Ok(x.to_owned()));
+
+	let mut headers = HeaderMap::new();
+	headers.insert(header::CONTENT_TYPE, "image/png".parse().unwrap());
+	headers.insert(header::CACHE_CONTROL, "no-cache".parse().unwrap());
+	headers.insert("ETag", checksum_header_value);
+
+	(headers, body).into_response()
 }

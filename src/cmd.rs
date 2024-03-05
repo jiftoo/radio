@@ -208,3 +208,33 @@ pub async fn mediainfo(input: &Path) -> Result<Mediainfo, String> {
 		codec: stream.codec_name,
 	})
 }
+
+/// returns true if album art was found
+/// sets length to 0 if no art is found
+pub async fn album_art_png(input: &Path) -> Result<Option<Vec<u8>>, String> {
+	let child = Command::new("ffmpeg")
+		.args(["-loglevel", "error", "-i"])
+		.arg(input)
+		.args(["-an", "-c:v", "png", "-f", "image2pipe", "-"])
+		.stdout(Stdio::piped())
+		.stderr(Stdio::piped())
+		.stdin(Stdio::null())
+		.kill_on_drop(true)
+		.spawn()
+		.unwrap();
+	let output = child.wait_with_output().await.unwrap();
+
+	if !output.status.success() {
+		let msg = String::from_utf8(output.stderr).unwrap();
+		if msg.contains("Output file does not contain any stream") {
+			return Ok(None);
+		}
+		return Err(format!("ffmpeg failed: {}", msg));
+	}
+
+	if output.stdout.is_empty() {
+		return Ok(None);
+	}
+
+	Ok(Some(output.stdout))
+}
