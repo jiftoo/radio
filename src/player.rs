@@ -93,7 +93,7 @@ pub struct Inner {
 	tx: tokio::sync::broadcast::Sender<Bytes>,
 	task_control_tx: tokio::sync::watch::Sender<TaskControlMessage>,
 	config: Arc<config::Config>,
-	statistics: Arc<RwLock<Statistics>>,
+	statistics: RwLock<Statistics>,
 }
 
 #[derive(Clone, Copy)]
@@ -269,8 +269,9 @@ impl Player {
 		let (stream, drop_rx) = TrackDropStream::create(stream);
 
 		tokio::spawn({
-			let statistics = self.inner.statistics.clone();
+			let inner = self.inner.clone();
 			async move {
+				let statistics = &inner.statistics;
 				{
 					let mut statistics = statistics.write().await;
 					statistics.listeners += 1;
