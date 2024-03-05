@@ -12,11 +12,7 @@ use std::{
 use axum::body::Bytes;
 use futures_core::Stream;
 use rand::Rng;
-use tokio::{
-	fs::File,
-	io::AsyncWriteExt,
-	sync::{oneshot, RwLock},
-};
+use tokio::sync::{oneshot, RwLock};
 
 use crate::{
 	audio::{self, AudioReader, FFMpegAudioReader},
@@ -143,13 +139,14 @@ impl Player {
 		tokio::spawn({
 			async move {
 				let mut rx = self.inner.task_control_tx.subscribe();
+				let player_init_instant = tokio::time::Instant::now();
 				loop {
 					let msg = *rx.borrow();
 					match msg {
 						TaskControlMessage::Play => loop {
 							tokio::select! {
 								_ = rx.changed() => break,
-								_ = self.play_next() => (),
+								_ = self.play_next(player_init_instant) => (),
 							}
 						},
 						TaskControlMessage::Pause => {
@@ -165,9 +162,7 @@ impl Player {
 	}
 
 	#[allow(clippy::significant_drop_tightening)]
-	async fn play_next(&self) {
-		let start_instant = tokio::time::Instant::now();
-
+	async fn play_next(&self, player_init_instant: tokio::time::Instant) {
 		let Inner { playlist, index, tx, config, .. } = &*self.inner;
 		let index = index.load(Ordering::Relaxed);
 
@@ -226,7 +221,7 @@ impl Player {
 						break;
 					}
 				}
-				self.inner.statistics.write().await.time_played = start_instant.elapsed();
+				self.inner.statistics.write().await.time_played = player_init_instant.elapsed();
 			}
 		};
 
