@@ -3,7 +3,6 @@ use std::{
 	process::Stdio,
 };
 
-use rand::seq::IteratorRandom;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
@@ -17,14 +16,15 @@ pub fn check_executables() -> (bool, Vec<(String, bool)>) {
 	(info.iter().all(|x| x.1), info)
 }
 
+#[allow(clippy::option_if_let_else)]
 pub fn spawn_ffmpeg(
 	input: &Path,
+	sweeper: Option<&Path>,
 	bitrate_bps: u32,
 	copy_codec: bool,
-	insert_sweeper: bool,
 ) -> tokio::process::Child {
-	if insert_sweeper {
-		build_with_sweeper(input, bitrate_bps)
+	if let Some(sweeper) = sweeper {
+		build_with_sweeper(input, sweeper, bitrate_bps)
 	} else {
 		build_without_sweeper(input, bitrate_bps, copy_codec)
 	}
@@ -63,25 +63,21 @@ fn build_without_sweeper(input: &Path, bitrate_bps: u32, copy_codec: bool) -> Co
 	cmd
 }
 
-pub fn build_with_sweeper(input: impl AsRef<Path>, bitrate_bps: u32) -> Command {
-	fn pick_sweeper() -> PathBuf {
-		std::fs::read_dir("./sweepers")
-			.unwrap()
-			.flatten()
-			.choose(&mut rand::thread_rng())
-			.unwrap()
-			.path()
-	}
+// temporarily permanent i think
+pub const SWEEPER_DIR: &str = "./sweepers";
 
+pub fn build_with_sweeper(
+	input: impl AsRef<Path>,
+	sweeper: impl AsRef<Path>,
+	bitrate_bps: u32,
+) -> Command {
 	let mut cmd = Command::new("ffmpeg");
-	let sweeper = pick_sweeper();
-	println!("sweeper: {:?}", sweeper);
 	cmd.args(["-hide_banner", "-loglevel", "error"])
 		.args(["-re", "-threads", "1"])
 		.arg("-i")
 		.arg(input.as_ref())
 		.arg("-i")
-		.arg(sweeper)
+		.arg(sweeper.as_ref())
 		.args(["-c:a", "mp3", "-b:a", &bitrate_bps.to_string()]);
 	cmd.args([
 		"-write_xing",

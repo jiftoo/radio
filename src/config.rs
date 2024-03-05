@@ -124,7 +124,7 @@ Optionally pass a path to the config file to be created/read (not directory).",
 		value_name = "0..1",
 		long,
 		action,
-		help = "Chance to prepend a (short) audio file from ./sweepers to a song. Set to 0 to disable",
+		help = format!("123"),
 		default_value_t = ZeroOneF32(0.0)
 	)]
 	pub sweeper_chance: ZeroOneF32,

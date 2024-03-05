@@ -11,7 +11,7 @@ use std::{
 
 use axum::body::Bytes;
 use futures_core::Stream;
-use rand::Rng;
+use rand::{seq::IteratorRandom, Rng};
 use tokio::sync::{oneshot, RwLock};
 
 use crate::{
@@ -87,6 +87,7 @@ pub struct Statistics {
 
 pub struct Inner {
 	playlist: Box<[PathBuf]>,
+	sweeper_list: Box<[PathBuf]>,
 	index: AtomicUsize,
 	mediainfo: RwLock<FixedDeque<cmd::Mediainfo>>,
 	tx: tokio::sync::broadcast::Sender<Bytes>,
@@ -109,7 +110,11 @@ pub enum Error {
 }
 
 impl Player {
-	pub fn new(playlist: Vec<PathBuf>, config: Arc<config::Config>) -> Result<Self, Error> {
+	pub fn new(
+		playlist: Vec<PathBuf>,
+		sweeper_list: Vec<PathBuf>,
+		config: Arc<config::Config>,
+	) -> Result<Self, Error> {
 		if playlist.is_empty() {
 			return Err(Error::EmptyPlayilist);
 		}
@@ -121,6 +126,7 @@ impl Player {
 		let player = Self {
 			inner: Arc::new(Inner {
 				playlist: playlist.into_boxed_slice(),
+				sweeper_list: sweeper_list.into_boxed_slice(),
 				index: index.into(),
 				mediainfo: FixedDeque::new(config.mediainfo_history.get()).into(),
 				tx,
@@ -163,7 +169,7 @@ impl Player {
 
 	#[allow(clippy::significant_drop_tightening)]
 	async fn play_next(&self, player_init_instant: tokio::time::Instant) {
-		let Inner { playlist, index, tx, config, .. } = &*self.inner;
+		let Inner { playlist, sweeper_list, index, tx, config, .. } = &*self.inner;
 		let index = index.load(Ordering::Relaxed);
 
 		let input = &playlist[index];
@@ -177,7 +183,13 @@ impl Player {
 			}
 		};
 
-		let run_sweeper = rand::thread_rng().gen::<f32>() <= config.sweeper_chance;
+		let sweeper_path = {
+			let mut rng = rand::thread_rng();
+			(rng.gen::<f32>() <= config.sweeper_chance).then(|| {
+				// checked non empty in main
+				sweeper_list.iter().choose(&mut rng).unwrap()
+			})
+		};
 		let copy_codec = !config.transcode_all && mediainfo.codec == "mp3";
 
 		println!(
@@ -185,7 +197,7 @@ impl Player {
 			playlist[index].file_name().unwrap(),
 			mediainfo.codec,
 			if copy_codec { "yes" } else { "no" },
-			if run_sweeper { "yes" } else { "no" }
+			sweeper_path.as_ref().map(|x| x.file_name().unwrap().to_str().unwrap()).unwrap_or("no")
 		);
 
 		self.inner.mediainfo.write().await.push(mediainfo);
@@ -227,9 +239,9 @@ impl Player {
 
 		transmit_reader(audio::FFMpegAudioReader::start(
 			input,
+			sweeper_path,
 			config.bitrate,
 			copy_codec,
-			run_sweeper,
 		))
 		.await;
 		self.next();

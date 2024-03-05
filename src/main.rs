@@ -41,6 +41,16 @@ async fn main() {
 		return;
 	};
 
+	let sweeper_list = files::collect(cmd::SWEEPER_DIR);
+	if config.sweeper_chance > 0.0 && sweeper_list.is_empty() {
+		println!(
+			"Sweeper chance is set to {}, but no sweepers found in {}",
+			config.sweeper_chance,
+			cmd::SWEEPER_DIR
+		);
+		return;
+	}
+
 	let port = config.port;
 	let path = config.dirs[0].root.clone();
 
@@ -54,7 +64,7 @@ async fn main() {
 		return;
 	}
 
-	let player = match Player::new(files::collect(&path), config.clone()) {
+	let player = match Player::new(files::collect(&path), sweeper_list, config.clone()) {
 		Ok(player) => player,
 		Err(e) => {
 			println!("Player error: {:?}", e);

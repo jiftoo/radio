@@ -28,11 +28,16 @@ pub struct FFMpegAudioReader {
 impl FFMpegAudioReader {
 	pub fn start(
 		input: impl AsRef<Path>,
+		sweeper: Option<impl AsRef<Path>>,
 		bitrate: u32,
 		copy_codec: bool,
-		insert_sweeper: bool,
 	) -> Self {
-		let mut handle = cmd::spawn_ffmpeg(input.as_ref(), bitrate, copy_codec, insert_sweeper);
+		let mut handle = cmd::spawn_ffmpeg(
+			input.as_ref(),
+			sweeper.as_ref().map(|x| x.as_ref()),
+			bitrate,
+			copy_codec,
+		);
 		let stdout = handle.stdout.take().unwrap();
 		let stderr = handle.stderr.take().unwrap();
 		Self {

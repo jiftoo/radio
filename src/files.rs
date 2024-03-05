@@ -5,7 +5,7 @@ use std::{
 
 use rayon::prelude::*;
 
-pub fn collect(path: &Path) -> Vec<PathBuf> {
+pub fn collect(path: impl AsRef<Path> + Send) -> Vec<PathBuf> {
 	const SUPPORTED_FORMATS: [&str; 4] = ["mp3", "flac", "opus", "wav"];
 
 	let pool = Arc::new(rayon::ThreadPoolBuilder::new().build().unwrap());
