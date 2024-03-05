@@ -12,7 +12,10 @@ mod player;
 use axum::{
 	body::Body,
 	debug_handler,
-	extract::{ws, Path, State, WebSocketUpgrade},
+	extract::{
+		ws::{self, rejection::WebSocketUpgradeRejection},
+		Path, State, WebSocketUpgrade,
+	},
 	http::{header, HeaderMap, HeaderValue, StatusCode, Uri},
 	response::{Html, IntoResponse},
 	routing::get,
@@ -205,19 +208,36 @@ async fn mediainfo(State(player): State<Player>) -> impl IntoResponse {
 	([(header::CONTENT_TYPE, "application/json")], mediainfo_json)
 }
 
-async fn mediainfo_ws(State(player): State<Player>, ws: WebSocketUpgrade) -> impl IntoResponse {
-	ws.on_upgrade(move |mut socket| async move {
-		let mut rx = player.subscribe_next_song();
-		loop {
-			tokio::select! {
-				biased;
-				None = socket.recv() => break,
-				_ = rx.changed() => {
-					let _ = socket.send(ws::Message::Text("next".to_string())).await;
-				},
-			}
+async fn mediainfo_ws(
+	State(player): State<Player>,
+	ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
+	headers: HeaderMap,
+) -> impl IntoResponse {
+	let (ws) = match ws {
+		Ok(x) => x,
+		Err(x) => {
+			println!("No websocket upgrade: {x:?}");
+			return Err(x);
 		}
-	})
+	};
+
+	Ok(ws
+		.on_failed_upgrade(|x| {
+			println!("Failed to upgrade: {:?}", x);
+		})
+		.on_upgrade(move |mut socket| async move {
+			let mut rx = player.subscribe_next_song();
+			loop {
+				tokio::select! {
+					biased;
+					None = socket.recv() => break,
+					_ = rx.changed() => {
+						println!("sending new song to socket");
+						let _ = socket.send(ws::Message::Text("next".to_string())).await;
+					},
+				}
+			}
+		}))
 }
 
 async fn webui(State(player): State<Player>) -> impl IntoResponse {

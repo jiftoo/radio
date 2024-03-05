@@ -1,6 +1,9 @@
 use std::{io::ErrorKind, process::Command};
 
 fn main() {
+	println!("cargo:rerun-if-env-changed=BASE_URL");
+	println!("cargo:rerun-if-changed=./radio-webapp/src");
+
 	let generated_warnings = (cannot_run("ffmpeg")) || (cannot_run("ffprobe"));
 
 	if generated_warnings {
@@ -31,9 +34,11 @@ fn build_web() {
 			panic!("Command failed: {:?}", cmd)
 		};
 	}
+
+	let base_url = env!("BASE_URL");
 	run(Command::new("pnpm").arg("i").current_dir("./radio-webapp"));
-	run(Command::new("pnpm").arg("build").env("BASE_URL", "/radio/").current_dir("./radio-webapp"));
-	println!("cargo:warning=Webapp built successfully.");
+	run(Command::new("pnpm").arg("build").env("BASE_URL", base_url).current_dir("./radio-webapp"));
+	println!("cargo:warning=Webapp built successfully. Base url: {:?}", base_url);
 }
 
 fn cannot_run(name: &str) -> bool {

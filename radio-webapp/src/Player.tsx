@@ -1,5 +1,5 @@
 import {JSX, createSignal} from "solid-js";
-import {HOSTNAME} from "./App";
+import {makeUrl} from "./App";
 
 export function Player() {
 	const [playing, setPlaying] = createSignal(false);
@@ -35,7 +35,7 @@ export function Player() {
 				</button>
 				<span>Volume:</span>
 				<input id="volume" type="range" min="0" max="100" step="1" value="100" onInput={changeVolume}></input>
-				<audio ref={audioRef} src={`http://${HOSTNAME}/stream`}></audio>
+				<audio ref={audioRef} src={makeUrl("http", "/stream")}></audio>
 			</div>
 		</div>
 	);

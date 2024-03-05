@@ -1,8 +1,8 @@
 import {JSX, Show, createSignal} from "solid-js";
-import {HOSTNAME} from "./App";
+import {makeUrl} from "./App";
 
 async function fetchMediainfo() {
-	return await fetch(`http://${HOSTNAME}/mediainfo`)
+	return await fetch(makeUrl("http", "/mediainfo"))
 		.then((v) => v.json())
 		.catch(() => {});
 }
@@ -16,16 +16,15 @@ function snakeCaseToTitleCase(str: string) {
 
 // rotate between foo and bar to actually update the image when url changes
 function makeImageUrl(other: boolean) {
-	// return `http://${HOSTNAME}/album_art?` + (other ? "bar" : "foo");
-	return `http://${HOSTNAME}/album_art?t=${Math.random()}`;
+	return makeUrl("http", `/album_art?t=${Math.random()}`);
 }
 
 export function Mediainfo() {
 	const [mediainfo, setMediainfo] = createSignal<null | Array<Map<string, any>>>(null);
 	const [useOtherUrl, setImageUrl] = createSignal(false);
 
-	// const ws = new WebSocket("ws://" + window.location.host + "/mediainfo/ws");
-	const ws = new WebSocket(`ws://${HOSTNAME}/mediainfo/ws`);
+	// const ws = new WebSocket("wss://" + window.location.host + "/mediainfo/ws");
+	const ws = new WebSocket(makeUrl("ws", "/mediainfo/ws"));
 	ws.onmessage = async () => {
 		setMediainfo(await fetchMediainfo());
 		setImageUrl((v) => !v);
