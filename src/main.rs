@@ -193,6 +193,10 @@ async fn stream(State(player): State<Player>) -> Result<impl IntoResponse, Strin
 	let mut headers = axum::http::HeaderMap::new();
 	headers.insert("Content-Type", "audio/mpeg".parse().unwrap());
 	headers.insert(
+		"Cache-Control",
+		"no-store, no-cache, must-revalidate, s-max-age=0".parse().unwrap(),
+	);
+	headers.insert(
 		"x-bitrate",
 		if player.config().transcode_all {
 			player.config().bitrate.to_string().parse().unwrap()
