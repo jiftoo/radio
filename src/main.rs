@@ -234,11 +234,11 @@ async fn mediainfo_ws(
 					biased;
 					None = socket.recv() => break,
 					_ = interaval.tick() => {
-						println!("pinging socket");
+						// println!("pinging socket");
 						socket.send(ws::Message::Ping(vec![])).await;
 					}
 					_ = rx.changed() => {
-						println!("sending new song to socket");
+						// println!("sending new song to socket");
 						let _ = socket.send(ws::Message::Text("next".to_string())).await;
 					},
 				}

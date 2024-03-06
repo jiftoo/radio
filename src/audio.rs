@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+	path::{Path, PathBuf},
+	time::Duration,
+};
 
 use tokio::io::AsyncReadExt;
 
@@ -64,9 +67,27 @@ impl AudioReader for FFMpegAudioReader {
 			},
 			Ok(x) = self.stderr.read_buf(&mut self.error_buf) => {
 				if x > 0 {
-					let mut message = String::from_utf8(self.error_buf.clone()).unwrap();
-					self.stderr.read_to_string(&mut message).await.unwrap();
-					Ok(Data::Error(message))
+					// i'm scared of locking up the whole thing on read_buf
+					// the following is tested and doesn't work very well.
+					// tokio::time::sleep(Duration::from_millis(200)).await;
+					// tokio::select! {
+					//   biased;
+					//   _ = self.stderr.read_buf(&mut self.error_buf) => {},
+					//   _ = std::future::ready(()) => {},
+					// }
+
+					let (tx, mut rx) = tokio::sync::oneshot::channel();
+					tokio::spawn(async move {
+						tokio::time::sleep(Duration::from_millis(200)).await;
+						tx.send(()).unwrap();
+					});
+					loop {
+						tokio::select! {
+							_ = self.stderr.read_buf(&mut self.error_buf) => {},
+							_ = &mut rx => break,
+						}
+					}
+					Ok(Data::Error(String::from_utf8_lossy(&self.error_buf).to_string()))
 				} else {
 					Ok(Data::Audio(0))
 				}
