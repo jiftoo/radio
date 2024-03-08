@@ -17,7 +17,7 @@ use axum::{
 		Path, State, WebSocketUpgrade,
 	},
 	http::{header, HeaderMap, HeaderValue, StatusCode, Uri},
-	response::{Html, IntoResponse},
+	response::{Html, IntoResponse, Redirect},
 	routing::get,
 	Router,
 };
@@ -150,8 +150,11 @@ fn define_routes(r: Router<Player>, config: &Arc<config::Config>) -> Router<Play
 	let mut r = r
 		.route("/stream", get(stream))
 		.route("/", get(webpage))
-		.route("/*file", get(webpage_assets))
 		.route("/album_art", get(album_art));
+	#[cfg(feature = "webapp")]
+	{
+		r = r.route("/*file", get(webpage_assets));
+	}
 	if config.enable_mediainfo {
 		r = r.route("/mediainfo", get(mediainfo));
 		r = r.route("/mediainfo/ws", get(mediainfo_ws));
@@ -162,14 +165,23 @@ fn define_routes(r: Router<Player>, config: &Arc<config::Config>) -> Router<Play
 	r
 }
 
+#[cfg(feature = "webapp")]
 #[derive(rust_embed::RustEmbed)]
 #[folder = "radio-webapp/dist/"]
 struct WebappAssets;
 
 async fn webpage() -> impl IntoResponse {
-	Html(WebappAssets::get("index.html").unwrap().data)
+	#[cfg(feature = "webapp")]
+	{
+		Html(WebappAssets::get("index.html").unwrap().data)
+	}
+	#[cfg(not(feature = "webapp"))]
+	{
+		Redirect::to("mediainfo")
+	}
 }
 
+#[cfg(feature = "webapp")]
 async fn webpage_assets(Path(path): Path<String>) -> impl IntoResponse {
 	if path.starts_with("assets/") {
 		path.replace("assets/", "");

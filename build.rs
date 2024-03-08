@@ -14,6 +14,7 @@ fn main() {
 		);
 	}
 
+	#[cfg(feature = "webapp")]
 	build_web();
 }
 
