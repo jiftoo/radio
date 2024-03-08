@@ -26,6 +26,7 @@
 	width: 100%;
 	height: 100%;
 	object-fit: contain;
+	border-radius: 5px;
 }
 
 #mediainfo > #info {
@@ -130,4 +131,16 @@
 	#mediainfo > #image > img {
 		max-height: 60vh;
 	}
+}
+
+#media-links {
+	display: flex;
+	flex-direction: row;
+	padding-top: 4px;
+	gap: 4px;
+}
+
+#media-links img {
+	width: 32px;
+	height: 32px;
 }
