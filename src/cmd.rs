@@ -34,7 +34,7 @@ pub fn spawn_ffmpeg(
 
 fn build_without_sweeper(input: &Path, bitrate_bps: u32, copy_codec: bool) -> Command {
 	let mut cmd = Command::new("ffmpeg");
-	cmd.args(["-hide_banner", "-loglevel", "error"])
+	cmd.args(["-hide_banner", "-loglevel", "fatal"])
 		.args(["-re", "-threads", "1", "-i"])
 		.arg(input);
 	if copy_codec {
@@ -72,7 +72,7 @@ pub fn build_with_sweeper(
 	bitrate_bps: u32,
 ) -> Command {
 	let mut cmd = Command::new("ffmpeg");
-	cmd.args(["-hide_banner", "-loglevel", "error"])
+	cmd.args(["-hide_banner", "-loglevel", "fatal"])
 		.args(["-re", "-threads", "1"])
 		.arg("-i")
 		.arg(input.as_ref())
@@ -120,7 +120,7 @@ pub async fn mediainfo(input: &Path) -> Result<Mediainfo, String> {
 	let child = Command::new("ffprobe")
 		.args([
 			"-loglevel",
-			"error",
+			"fatal",
 			"-select_streams",
 			"a:0",
 			"-show_entries",
@@ -213,7 +213,7 @@ pub async fn mediainfo(input: &Path) -> Result<Mediainfo, String> {
 /// sets length to 0 if no art is found
 pub async fn album_art_png(input: &Path) -> Result<Option<Vec<u8>>, String> {
 	let child = Command::new("ffmpeg")
-		.args(["-loglevel", "error", "-i"])
+		.args(["-loglevel", "fatal", "-i"])
 		.arg(input)
 		.args(["-an", "-c:v", "png", "-f", "image2pipe", "-"])
 		.stdout(Stdio::piped())
