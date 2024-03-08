@@ -19,7 +19,6 @@ rand = "0.8.5"
 rayon = "1.9.0"
 rust-embed = { version = "8.3.0", features = ["axum"], optional = true }
 serde = { version = "1.0.197", features = ["derive"] }
-serde-aux = { version = "4.5.0", default-features = false }
 serde_json = "1.0.114"
 tokio = { version = "1.36.0", features = ["rt-multi-thread", "process"] }
 tokio-stream = { version = "0.1.14", default-features = false, features = [

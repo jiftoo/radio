@@ -161,13 +161,21 @@ pub async fn mediainfo(input: &Path) -> Result<Mediainfo, String> {
 
 	#[derive(Deserialize)]
 	pub struct PMediainfo {
+		#[serde(alias = "TITLE")]
 		pub title: Option<String>,
+		#[serde(alias = "ALBUM")]
 		pub album: Option<String>,
+		#[serde(alias = "ARTIST")]
 		pub artist: Option<String>,
+		#[serde(alias = "ALBUM_ARTIST")]
 		pub album_artist: Option<String>,
+		#[serde(alias = "PUBLISHER")]
 		pub publisher: Option<String>,
+		#[serde(alias = "DISC")]
 		pub disc: Option<String>,
+		#[serde(alias = "TRACK")]
 		pub track: Option<String>,
+		#[serde(alias = "GENRE")]
 		pub genre: Option<String>,
 	}
 
