@@ -14,7 +14,7 @@ use axum::{
 	debug_handler,
 	extract::{
 		ws::{self, rejection::WebSocketUpgradeRejection},
-		Path, State, WebSocketUpgrade,
+		Path, Query, State, WebSocketUpgrade,
 	},
 	http::{header, HeaderMap, HeaderValue, StatusCode, Uri},
 	response::{Html, IntoResponse, Redirect},
@@ -297,8 +297,18 @@ async fn webui(State(player): State<Player>) -> impl IntoResponse {
 	};
 	([(header::CONTENT_TYPE, "text/plain")], body)
 }
+
+#[derive(serde::Deserialize)]
+struct NQuery {
+	n: String,
+}
+
 #[allow(clippy::significant_drop_tightening)]
-async fn album_art(State(player): State<Player>, headers: HeaderMap) -> impl IntoResponse {
+async fn album_art(
+	State(player): State<Player>,
+	headers: HeaderMap,
+	n_query: Option<Query<NQuery>>,
+) -> impl IntoResponse {
 	let album_art = &player.album_art().read().await;
 
 	let checksum_header_value =
@@ -316,7 +326,11 @@ async fn album_art(State(player): State<Player>, headers: HeaderMap) -> impl Int
 
 	let mut headers = HeaderMap::new();
 	headers.insert(header::CONTENT_TYPE, "image/png".parse().unwrap());
-	headers.insert(header::CACHE_CONTROL, "no-cache".parse().unwrap());
+	if n_query.is_some() {
+		headers.insert(header::CACHE_CONTROL, "max-age=1800".parse().unwrap());
+	} else {
+		headers.insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
+	}
 	headers.insert("ETag", checksum_header_value);
 
 	(headers, body).into_response()

@@ -3,8 +3,8 @@ import "./App.css";
 import {Mediainfo} from "./Mediainfo";
 import {Player} from "./Player";
 
-// export const HOSTNAME = "localhost:9005";
 const HOSTNAME = new URL(import.meta.env.BASE_URL, location.origin);
+// const HOSTNAME = new URL(import.meta.env.BASE_URL, "http://localhost:9005");
 
 export function makeUrl(protocol: "http" | "ws", path: string) {
 	let newProtocol: string = protocol;
@@ -27,7 +27,7 @@ export function makeUrl(protocol: "http" | "ws", path: string) {
 	if (!url.endsWith("/")) {
 		url += "/";
 	}
-	console.log("url + path", newUrl + path);
+	// console.log("url + path", newUrl + path);
 	return newUrl + path;
 }
 
