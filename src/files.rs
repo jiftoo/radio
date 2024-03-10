@@ -23,6 +23,9 @@ fn walk(path: DirectoryConfig, pool: Arc<ThreadPool>) -> Vec<PathBuf> {
 		.flatten()
 		.filter(|x| match &path.mode {
 			config::DirectoryConfigMode::Exclude(dirs) => {
+				if dirs.is_empty() {
+					return true;
+				}
 				dirs.iter().any(|y| !x.path().starts_with(y))
 			}
 			config::DirectoryConfigMode::Include(dirs) => {
