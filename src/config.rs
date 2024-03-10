@@ -208,9 +208,8 @@ pub struct DirectoryConfigModeCli {
 
 impl From<CliConfig> for Config {
 	fn from(cli: CliConfig) -> Self {
-		println!("{:?}", cli);
 		let mut dir = Vec::new();
-		
+
 		let mode = match cli.mode {
 			Some(DirectoryConfigModeCli { include, exclude }) => {
 				if !include.is_empty() {
