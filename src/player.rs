@@ -398,7 +398,7 @@ async fn try_album_arts(input: impl AsRef<Path> + Send) -> Option<(PathBuf, Vec<
 	let mut futures_vec = vec![];
 	// then try from the same directory
 	if let Some(x) = input.as_ref().parent() {
-		std::fs::read_dir(x)
+		let images = std::fs::read_dir(x)
 			.unwrap()
 			.flatten()
 			.filter(|x| {
@@ -410,7 +410,17 @@ async fn try_album_arts(input: impl AsRef<Path> + Send) -> Option<(PathBuf, Vec<
 						.extension()
 						.map_or(false, |x| x == "png" || x == "jpg" || x == "jpeg")
 			})
-			.for_each(|x| futures_vec.push(try_album_art(x.path())));
+			.collect::<Vec<_>>();
+		// try to read "cover.*" from the same directory
+		if let Some(x) =
+			images.iter().find(|x| x.path().file_stem().map_or(false, |x| x == "cover"))
+		{
+			futures_vec.push(try_album_art(x.path()));
+		} else {
+			for x in images {
+				futures_vec.push(try_album_art(x.path()));
+			}
+		}
 	}
 
 	let mut joins = JoinSet::new();
