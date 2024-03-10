@@ -27,6 +27,8 @@ use player::Player;
 use std::{fmt::Write, sync::Arc, time::Duration};
 use tokio::time::Interval;
 
+use crate::config::DirectoryConfig;
+
 #[tokio::main]
 async fn main() {
 	match cmd::check_executables() {
@@ -51,7 +53,11 @@ async fn main() {
 		return;
 	};
 
-	let sweeper_list = files::collect(cmd::SWEEPER_DIR);
+	let sweeper_list = files::collect(&[DirectoryConfig {
+		mode: config::DirectoryConfigMode::Exclude(vec![].into_boxed_slice()),
+		root: cmd::SWEEPER_DIR.into(),
+	}]);
+
 	if config.sweeper_chance > 0.0 && sweeper_list.is_empty() {
 		println!(
 			"Sweeper chance is set to {}, but no sweepers found in {}",
@@ -62,19 +68,8 @@ async fn main() {
 	}
 
 	let port = config.port;
-	let path = config.dirs[0].root.clone();
 
-	if !path.exists() {
-		println!("{} does not exist", path.display());
-		return;
-	}
-
-	if !path.is_dir() {
-		println!("{} is not a directory", path.display());
-		return;
-	}
-
-	let player = match Player::new(files::collect(&path), sweeper_list, config.clone()) {
+	let player = match Player::new(files::collect(&config.dirs), sweeper_list, config.clone()) {
 		Ok(player) => player,
 		Err(e) => {
 			println!("Player error: {:?}", e);

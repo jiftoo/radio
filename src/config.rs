@@ -208,28 +208,32 @@ pub struct DirectoryConfigModeCli {
 
 impl From<CliConfig> for Config {
 	fn from(cli: CliConfig) -> Self {
+		println!("{:?}", cli);
 		let mut dir = Vec::new();
+		
 		let mode = match cli.mode {
 			Some(DirectoryConfigModeCli { include, exclude }) => {
 				if !include.is_empty() {
-					dir.push(DirectoryConfig {
+					Some(DirectoryConfig {
 						root: cli.root.clone(),
 						mode: DirectoryConfigMode::Include(include.into_boxed_slice()),
-					});
-				}
-				if !exclude.is_empty() {
-					dir.push(DirectoryConfig {
+					})
+				} else if !exclude.is_empty() {
+					Some(DirectoryConfig {
 						root: cli.root.clone(),
 						mode: DirectoryConfigMode::Exclude(exclude.into_boxed_slice()),
-					});
+					})
+				} else {
+					// unreachable!()
+					None
 				}
-				unreachable!()
 			}
 			None => Some(DirectoryConfig {
 				root: cli.root,
 				mode: DirectoryConfigMode::Exclude([].into()),
 			}),
 		};
+
 		if let Some(mode) = mode {
 			dir.push(mode);
 		}
