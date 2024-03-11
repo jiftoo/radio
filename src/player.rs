@@ -209,6 +209,7 @@ impl Player {
 			Ok(x) => x,
 			Err(x) => {
 				println!("{:?}\tbroken file - skipping: {x}", playlist[index].file_name().unwrap());
+				tokio::time::sleep(Duration::from_secs(1)).await;
 				self.next();
 				return;
 			}
