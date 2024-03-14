@@ -35,7 +35,7 @@ export function Player() {
 				</button>
 				<span>Volume:</span>
 				<input id="volume" type="range" min="0" max="100" step="1" value="100" onInput={changeVolume}></input>
-				<audio ref={audioRef} src={makeUrl("http", "/stream")}></audio>
+				<audio ref={audioRef} src={makeUrl("http", "/stream?" + Math.random().toString())}></audio>
 			</div>
 		</div>
 	);
