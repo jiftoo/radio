@@ -28,6 +28,7 @@ pub fn spawn_ffmpeg(
 	} else {
 		build_without_sweeper(input, bitrate_bps, copy_codec)
 	}
+	.kill_on_drop(true)
 	.spawn()
 	.unwrap()
 }

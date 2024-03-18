@@ -43,11 +43,10 @@ fn build_web() {
 }
 
 fn cannot_run(name: &str) -> bool {
-	match Command::new(name).spawn().or(Command::new(format!("./{name}")).spawn()) {
-		Ok(mut x) => {
-			let _ = x.kill();
-			false
-		}
+	let in_path = Command::new(name).spawn();
+	let in_cd = Command::new(format!("./{name}")).spawn();
+	let result = match in_path.as_ref().or(in_cd.as_ref()) {
+		Ok(_) => false,
 		Err(err) => match err.kind() {
 			ErrorKind::NotFound => {
 				println!("cargo:warning='{name}' not found on your system. Make sure it's in cwd of the program or in PATH.");
@@ -58,5 +57,8 @@ fn cannot_run(name: &str) -> bool {
 				true
 			}
 		},
-	}
+	};
+	let _ = in_path.map(|mut x| x.kill());
+	let _ = in_cd.map(|mut x| x.kill());
+	result
 }
