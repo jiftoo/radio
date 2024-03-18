@@ -33,6 +33,10 @@ pub fn spawn_ffmpeg(
 }
 
 fn build_without_sweeper(input: &Path, bitrate_bps: u32, copy_codec: bool) -> Command {
+	build_opus(input, bitrate_bps, copy_codec)
+}
+
+fn build_mp3(input: &Path, bitrate_bps: u32, copy_codec: bool) -> Command {
 	let mut cmd = Command::new("ffmpeg");
 	cmd.args(["-hide_banner", "-loglevel", "fatal"])
 		.args(["-re", "-threads", "1", "-i"])
@@ -55,6 +59,38 @@ fn build_without_sweeper(input: &Path, bitrate_bps: u32, copy_codec: bool) -> Co
 		"0:a",
 		"-f",
 		"mp3",
+		"-",
+	])
+	.stdout(Stdio::piped())
+	.stderr(Stdio::piped())
+	.stdin(Stdio::null());
+	cmd
+}
+
+// https://wiki.xiph.org/OggOpus
+// To stream ogg I'll need to send the metadata to the client as he connects.
+// The metadata is the OggS packet which, the followign OpusHead and OpusTags packets.
+// Hopefully I'll be able to send this only once whenever someone connects,
+// and then just stream normally.
+
+fn build_opus(input: &Path, bitrate_bps: u32, copy_codec: bool) -> Command {
+	let mut cmd = Command::new("ffmpeg");
+	cmd.args(["-hide_banner", "-loglevel", "fatal"])
+		.args(["-re", "-threads", "1", "-i"])
+		.arg(input);
+	if copy_codec {
+		cmd.args(["-c:a", "copy"]);
+	} else {
+		cmd.args(["-c:a", "libopus", "-b:a", &bitrate_bps.to_string()]);
+	}
+	cmd.args([
+		// "-map_metadata",
+		// "-1",
+		"-vn",
+		"-map",
+		"0:a",
+		"-f",
+		"ogg",
 		"-",
 	])
 	.stdout(Stdio::piped())

@@ -10,7 +10,7 @@ mod files;
 mod player;
 
 use axum::{
-	body::Body,
+	body::{Body, Bytes},
 	debug_handler,
 	extract::{
 		ws::{self, rejection::WebSocketUpgradeRejection},
@@ -26,6 +26,7 @@ use clap::Parser;
 use player::Player;
 use std::{fmt::Write, sync::Arc, time::Duration};
 use tokio::time::Interval;
+use tokio_stream::StreamExt;
 
 use crate::config::DirectoryConfig;
 
@@ -195,10 +196,10 @@ async fn webpage_assets(Path(path): Path<String>) -> impl IntoResponse {
 
 #[debug_handler]
 async fn stream(State(player): State<Player>) -> Result<impl IntoResponse, String> {
-	let stream = player.subscribe();
+	let (opus_header, stream) = player.subscribe();
 
 	let mut headers = axum::http::HeaderMap::new();
-	headers.insert("Content-Type", "audio/mpeg".parse().unwrap());
+	headers.insert("Content-Type", "audio/ogg".parse().unwrap());
 	headers.insert(
 		"Cache-Control",
 		"no-store, no-cache, must-revalidate, s-max-age=0".parse().unwrap(),
@@ -212,7 +213,11 @@ async fn stream(State(player): State<Player>) -> Result<impl IntoResponse, Strin
 		},
 	);
 
-	Ok((headers, Body::from_stream(stream).into_response()))
+	println!("waiting for opus header to exist");
+	let opus_header_stream = tokio_stream::once(Ok(opus_header.wait().await.clone()));
+	println!("done waiting");
+
+	Ok((headers, Body::from_stream(opus_header_stream.chain(stream)).into_response()))
 }
 
 async fn mediainfo(State(player): State<Player>) -> impl IntoResponse {

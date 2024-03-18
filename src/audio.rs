@@ -3,7 +3,7 @@ use std::{
 	time::Duration,
 };
 
-use tokio::io::AsyncReadExt;
+use tokio::{io::AsyncReadExt, sync::Notify};
 
 use crate::cmd::{self};
 

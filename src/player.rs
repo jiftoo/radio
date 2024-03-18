@@ -10,10 +10,10 @@ use std::{
 };
 
 use axum::body::Bytes;
-use futures_core::Stream;
+use futures_core::{Future, Stream};
 use rand::{seq::IteratorRandom, Rng};
 use tokio::{
-	sync::{oneshot, RwLock},
+	sync::{oneshot, OnceCell, RwLock},
 	task::JoinSet,
 };
 
@@ -88,6 +88,39 @@ pub struct Statistics {
 	pub target_badwidth: usize,
 }
 
+pub struct WaitableOnceCell<T: Send + Sync> {
+	inner: OnceCell<T>,
+	waiters: tokio::sync::Notify,
+}
+
+// taken from a rejected pr to tokio
+// https://github.com/tokio-rs/tokio/pull/4828/commits/8b3fca8ccaf90c22bd1856f4a5b34a3a12f8f69e
+impl<T: Send + Sync> WaitableOnceCell<T> {
+	pub fn new() -> Self {
+		Self { inner: OnceCell::new(), waiters: tokio::sync::Notify::new() }
+	}
+
+	pub async fn get_or_init<F, Fut>(&self, f: F) -> &T
+	where
+		F: FnOnce() -> Fut + Send,
+		Fut: Future<Output = T> + Send,
+	{
+		let result = self.inner.get_or_init(f).await;
+		self.waiters.notify_waiters();
+		result
+	}
+
+	pub async fn wait(&self) -> &T {
+		if self.inner.initialized() {
+			return unsafe { self.inner.get().unwrap_unchecked() };
+		} else {
+			let notified = self.waiters.notified();
+			notified.await;
+			unsafe { self.inner.get().unwrap_unchecked() }
+		}
+	}
+}
+
 pub struct Inner {
 	playlist: Box<[PathBuf]>,
 	sweeper_list: Box<[PathBuf]>,
@@ -99,6 +132,7 @@ pub struct Inner {
 	task_control_tx: tokio::sync::watch::Sender<TaskControlMessage>,
 	config: Arc<config::Config>,
 	statistics: RwLock<Statistics>,
+	opus_header: Arc<WaitableOnceCell<Bytes>>,
 }
 
 #[derive(Debug, Default)]
@@ -164,6 +198,7 @@ impl Player {
 				task_control_tx: tokio::sync::watch::channel(TaskControlMessage::Play).0,
 				config,
 				statistics: Default::default(),
+				opus_header: WaitableOnceCell::new().into(),
 			}),
 		};
 
@@ -257,6 +292,9 @@ impl Player {
 			let buf = &mut [0u8; 4096];
 			let mut bandwidth_instant = tokio::time::Instant::now();
 			let mut bandwidth_acc = 0;
+
+			let mut opus_header = Vec::new();
+			let mut opus_header_ready = false;
 			loop {
 				let data = reader.read_data(buf).await.unwrap();
 				match data {
@@ -264,6 +302,24 @@ impl Player {
 					audio::Data::Audio(read) => {
 						let _ = tx.send(Bytes::copy_from_slice(&buf[..read]));
 						bandwidth_acc += read;
+
+						if !opus_header_ready {
+							opus_header.extend_from_slice(&buf[..read]);
+
+							if let Some(header_length) = String::from_utf8_lossy(&opus_header)
+								.split_once("OpusTags")
+								.and_then(|(_, x)| x.find("OggS"))
+							{
+								opus_header_ready = true;
+								self.inner
+									.opus_header
+									.get_or_init(|| async {
+										println!("opus header init");
+										Bytes::copy_from_slice(&opus_header[..header_length])
+									})
+									.await;
+							}
+						}
 
 						// clippy::significant_drop_tightening
 						let mut stats = self.inner.statistics.write().await;
@@ -315,7 +371,7 @@ impl Player {
 		&self.inner.playlist
 	}
 
-	pub fn subscribe(&self) -> PlayerRx {
+	pub fn subscribe(&self) -> (Arc<WaitableOnceCell<Bytes>>, PlayerRx) {
 		let _tx = self.inner.tx.subscribe();
 		let stream = tokio_stream::wrappers::BroadcastStream::new(self.inner.tx.subscribe());
 		let (stream, drop_rx) = TrackDropStream::create(stream);
@@ -337,7 +393,7 @@ impl Player {
 			}
 		});
 
-		stream
+		(self.inner.opus_header.clone(), stream)
 	}
 
 	pub fn subscribe_next_song(&self) -> tokio::sync::watch::Receiver<()> {
